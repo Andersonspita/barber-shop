@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
+import { API_URL } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
 interface Service {
@@ -33,7 +34,7 @@ export default function GerenciarServicos() {
     }
 
     try {
-      const res = await fetch('http://localhost:3333/admin/services', {
+      const res = await fetch(`${API_URL}/admin/services`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -63,8 +64,8 @@ export default function GerenciarServicos() {
     const token = localStorage.getItem('access_token');
     
     const url = isEditing 
-      ? `http://localhost:3333/admin/services/${currentId}` 
-      : 'http://localhost:3333/admin/services';
+      ? `${API_URL}/admin/services/${currentId}` 
+      : `${API_URL}/admin/services`;
     
     const method = isEditing ? 'PUT' : 'POST';
 
@@ -107,7 +108,7 @@ export default function GerenciarServicos() {
     
     const token = localStorage.getItem('access_token');
     try {
-      const res = await fetch(`http://localhost:3333/admin/services/${id}`, {
+      const res = await fetch(`${API_URL}/admin/services/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });

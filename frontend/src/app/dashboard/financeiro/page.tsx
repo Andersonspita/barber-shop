@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
+import { API_URL } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subDays, formatISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -54,7 +55,7 @@ export default function Financeiro() {
       if (userIsAdmin) {
         // Fetch barbers for the select filter
         try {
-          const res = await fetch('http://localhost:3333/barbers');
+          const res = await fetch(`${API_URL}/barbers`);
           if (res.ok) setBarbers(await res.json());
         } catch (err) {
           console.error(err);
@@ -75,7 +76,7 @@ export default function Financeiro() {
 
     setLoading(true);
     try {
-      let url = `http://localhost:3333/appointments/metrics/advanced?startDate=${startDate}&endDate=${endDate}`;
+      let url = `${API_URL}/appointments/metrics/advanced?startDate=${startDate}&endDate=${endDate}`;
       if (barberId) url += `&barberId=${barberId}`;
 
       const res = await fetch(url, {

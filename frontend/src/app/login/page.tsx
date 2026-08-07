@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
+import { API_URL } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
 export default function Login() {
@@ -24,7 +25,7 @@ export default function Login() {
     const endpoint = tab === 'LOGIN' ? '/auth/login' : '/auth/signup';
     
     try {
-      const response = await fetch(`http://localhost:3333${endpoint}`, {
+      const response = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 

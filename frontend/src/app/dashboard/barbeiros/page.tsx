@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
+import { API_URL } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
 interface Barber {
@@ -39,7 +40,7 @@ export default function GerenciarBarbeiros() {
     }
 
     try {
-      const res = await fetch('http://localhost:3333/admin/barbers', {
+      const res = await fetch(`${API_URL}/admin/barbers`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -71,8 +72,8 @@ export default function GerenciarBarbeiros() {
     const token = localStorage.getItem('access_token');
     
     const url = isEditing 
-      ? `http://localhost:3333/admin/barbers/${currentId}` 
-      : 'http://localhost:3333/admin/barbers';
+      ? `${API_URL}/admin/barbers/${currentId}` 
+      : `${API_URL}/admin/barbers`;
     
     const method = isEditing ? 'PUT' : 'POST';
 
@@ -120,7 +121,7 @@ export default function GerenciarBarbeiros() {
     
     const token = localStorage.getItem('access_token');
     try {
-      const res = await fetch(`http://localhost:3333/admin/barbers/${id}`, {
+      const res = await fetch(`${API_URL}/admin/barbers/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
