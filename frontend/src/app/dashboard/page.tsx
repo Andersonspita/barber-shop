@@ -45,7 +45,7 @@ export default function Dashboard() {
     const role = localStorage.getItem('user_role');
     
     if (!token) {
-      router.push('/login');
+      router.push('/login?role=barbeiro');
       return;
     }
 
@@ -64,7 +64,7 @@ export default function Dashboard() {
       if (!apptsRes.ok || !metricsRes.ok) {
         if (apptsRes.status === 401 || metricsRes.status === 401) {
           localStorage.removeItem('access_token');
-          router.push('/login');
+          router.push('/login?role=barbeiro');
         }
         throw new Error('Falha ao buscar dados');
       }
@@ -84,7 +84,7 @@ export default function Dashboard() {
 
   const handleLogout = () => {
     localStorage.removeItem('access_token');
-    router.push('/login');
+    router.push('/login?role=barbeiro');
   };
 
   const handleUpdateStatus = async (id: string, status: string) => {
@@ -185,9 +185,9 @@ export default function Dashboard() {
         </div>
       )}
       <header className="sticky top-0 z-50 border-b border-neutral-800 bg-neutral-950/90 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-3 sm:h-16 sm:flex-row sm:items-center sm:justify-between sm:gap-0 sm:px-6 sm:py-0">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500 text-neutral-950 font-black text-sm">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-neutral-950 font-black text-sm">
               GB
             </div>
             <div>
@@ -195,22 +195,22 @@ export default function Dashboard() {
               <span className="text-xs text-neutral-500">Área de {userName}</span>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:flex-nowrap sm:justify-end">
             {isAdmin && (
               <>
-                <button 
+                <button
                   onClick={() => router.push('/dashboard/clientes')}
                   className="text-xs font-bold uppercase tracking-wider text-amber-500 hover:text-amber-400 transition-colors"
                 >
                   👥 Clientes
                 </button>
-                <button 
+                <button
                   onClick={() => router.push('/dashboard/barbeiros')}
                   className="text-xs font-bold uppercase tracking-wider text-amber-500 hover:text-amber-400 transition-colors"
                 >
                   ✂️ Equipe
                 </button>
-                <button 
+                <button
                   onClick={() => router.push('/dashboard/servicos')}
                   className="text-xs font-bold uppercase tracking-wider text-amber-500 hover:text-amber-400 transition-colors"
                 >
@@ -218,13 +218,13 @@ export default function Dashboard() {
                 </button>
               </>
             )}
-            <button 
+            <button
               onClick={() => router.push('/dashboard/financeiro')}
-              className="text-xs font-bold uppercase tracking-wider text-green-500 hover:text-green-400 transition-colors mr-2"
+              className="text-xs font-bold uppercase tracking-wider text-green-500 hover:text-green-400 transition-colors sm:mr-2"
             >
               💰 Financeiro
             </button>
-            <button 
+            <button
               onClick={handleLogout}
               className="text-xs font-bold uppercase tracking-wider text-neutral-400 hover:text-red-400 transition-colors"
             >

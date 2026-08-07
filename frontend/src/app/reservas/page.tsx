@@ -24,7 +24,7 @@ export default function MinhasReservas() {
     const role = localStorage.getItem('user_role');
     
     if (!token || role !== 'CLIENT') {
-      router.push('/login');
+      router.push('/login?role=cliente');
       return;
     }
 
@@ -37,7 +37,7 @@ export default function MinhasReservas() {
         if (response.status === 401) {
           localStorage.removeItem('access_token');
           localStorage.removeItem('user_role');
-          router.push('/login');
+          router.push('/login?role=cliente');
         }
         throw new Error('Falha ao buscar reservas');
       }
@@ -103,7 +103,7 @@ export default function MinhasReservas() {
             </div>
           </div>
           <button 
-            onClick={() => router.push('/')}
+            onClick={() => router.push('/reservas/nova')}
             className="text-xs font-bold uppercase tracking-wider text-amber-500 hover:text-amber-400 transition-colors"
           >
             Novo Agendamento
@@ -125,7 +125,7 @@ export default function MinhasReservas() {
             <h3 className="text-lg font-bold text-white">Nenhum agendamento encontrado</h3>
             <p className="text-sm text-neutral-400 mt-1">Você ainda não marcou nenhum horário.</p>
             <button 
-              onClick={() => router.push('/')}
+              onClick={() => router.push('/reservas/nova')}
               className="mt-6 inline-flex items-center rounded-xl bg-amber-500 px-6 py-3 text-sm font-bold text-neutral-950 transition-all hover:bg-amber-400 hover:scale-[1.02] active:scale-95 shadow-[0_0_20px_rgba(245,158,11,0.3)]"
             >
               Agendar Agora

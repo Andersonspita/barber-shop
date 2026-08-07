@@ -47,7 +47,7 @@ export default function Financeiro() {
       const token = localStorage.getItem('access_token');
       const userIsAdmin = localStorage.getItem('is_admin') === 'true';
       if (!token) {
-        router.push('/login');
+        router.push('/login?role=barbeiro');
         return;
       }
       setIsAdmin(userIsAdmin);
@@ -113,9 +113,9 @@ export default function Financeiro() {
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans">
       <header className="sticky top-0 z-50 border-b border-neutral-800 bg-neutral-950/90 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
+        <div className="mx-auto flex max-w-5xl flex-col gap-3 px-4 py-3 sm:h-16 sm:flex-row sm:items-center sm:justify-between sm:gap-0 sm:px-6 sm:py-0">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-green-500 text-neutral-950 font-black text-sm">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-green-500 text-neutral-950 font-black text-sm">
               💰
             </div>
             <div>
