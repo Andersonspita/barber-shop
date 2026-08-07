@@ -67,7 +67,7 @@ export default function MinhasReservas() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ status: 'CANCELED' })
+        body: JSON.stringify({ status: 'CANCELLED' })
       });
 
       if (res.ok) {
@@ -145,7 +145,7 @@ export default function MinhasReservas() {
                 >
                   {isScheduled && <div className="absolute left-0 top-0 h-full w-1 bg-amber-500/80" />}
                   {!isScheduled && appt.status === 'COMPLETED' && <div className="absolute left-0 top-0 h-full w-1 bg-green-500/50" />}
-                  {!isScheduled && appt.status === 'CANCELED' && <div className="absolute left-0 top-0 h-full w-1 bg-red-500/50" />}
+                  {!isScheduled && appt.status === 'CANCELLED' && <div className="absolute left-0 top-0 h-full w-1 bg-red-500/50" />}
                   
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
@@ -155,7 +155,7 @@ export default function MinhasReservas() {
                       {appt.status === 'COMPLETED' && (
                         <span className="text-xs font-semibold uppercase tracking-wider text-green-400 bg-green-400/10 px-2 py-1 rounded-md">Concluído</span>
                       )}
-                      {appt.status === 'CANCELED' && (
+                      {appt.status === 'CANCELLED' && (
                         <span className="text-xs font-semibold uppercase tracking-wider text-red-400 bg-red-400/10 px-2 py-1 rounded-md">Cancelado</span>
                       )}
                     </div>

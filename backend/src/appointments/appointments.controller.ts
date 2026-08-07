@@ -34,15 +34,6 @@ export class AppointmentsController {
     return { message: 'Agendamento confirmado!', appointmentId: appt.id };
   }
 
-  // Endpoint injetado temporariamente para facilitar o teste do Front
-  @Get('test-data')
-  async getTestData() {
-    const prisma = (this.appointmentsService as any).prisma;
-    const client = await prisma.user.findFirst({ where: { role: 'CLIENT' } });
-    const service = await prisma.service.findFirst();
-    return { clientId: client?.id, serviceId: service?.id };
-  }
-
   @UseGuards(AuthGuard('jwt'))
   @Get('metrics/today')
   async getTodayMetrics(@Request() req: any) {
@@ -89,7 +80,7 @@ export class AppointmentsController {
     @Body('status') status: string,
     @Request() req: any
   ) {
-    if (req.user.role === 'CLIENT' && status !== 'CANCELED') {
+    if (req.user.role === 'CLIENT' && status !== 'CANCELLED') {
       throw new BadRequestException('Clientes só podem cancelar agendamentos.');
     }
     return this.appointmentsService.updateStatus(id, status, req.user.id, req.user.role);

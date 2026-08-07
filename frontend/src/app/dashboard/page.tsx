@@ -293,7 +293,7 @@ export default function Dashboard() {
                 >
                   {isScheduled && <div className="absolute left-0 top-0 h-full w-1 bg-amber-500/80 group-hover:bg-amber-400 transition-colors" />}
                   {!isScheduled && appt.status === 'COMPLETED' && <div className="absolute left-0 top-0 h-full w-1 bg-green-500/50" />}
-                  {!isScheduled && appt.status === 'CANCELED' && <div className="absolute left-0 top-0 h-full w-1 bg-red-500/50" />}
+                  {!isScheduled && appt.status === 'CANCELLED' && <div className="absolute left-0 top-0 h-full w-1 bg-red-500/50" />}
                   
                   <div className="flex justify-between items-start mb-4">
                     <div>
@@ -304,7 +304,7 @@ export default function Dashboard() {
                     {appt.status === 'COMPLETED' && (
                       <span className="text-xs font-semibold uppercase tracking-wider text-green-400 bg-green-400/10 px-2 py-1 rounded-md">Concluído</span>
                     )}
-                    {appt.status === 'CANCELED' && (
+                    {appt.status === 'CANCELLED' && (
                       <span className="text-xs font-semibold uppercase tracking-wider text-red-400 bg-red-400/10 px-2 py-1 rounded-md">Cancelado</span>
                     )}
                   </div>
@@ -332,7 +332,7 @@ export default function Dashboard() {
                           Concluir
                         </button>
                         <button 
-                          onClick={() => handleUpdateStatus(appt.id, 'CANCELED')}
+                          onClick={() => handleUpdateStatus(appt.id, 'CANCELLED')}
                           className="flex-1 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-xs font-bold text-red-500 hover:bg-red-500 hover:text-white transition-colors"
                         >
                           Cancelar

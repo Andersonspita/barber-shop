@@ -5,13 +5,14 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { PrismaModule } from '../prisma/prisma.module';
 import { JwtStrategy } from './jwt.strategy';
+import { requireJwtSecret } from './jwt-secret.util';
 
 @Module({
   imports: [
     PrismaModule,
     PassportModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'super-secret-key-for-dev',
+      secret: requireJwtSecret(),
       signOptions: { expiresIn: '1d' },
     }),
   ],
