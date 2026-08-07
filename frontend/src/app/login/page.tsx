@@ -1,18 +1,20 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import { API_URL } from '@/lib/api';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function Login() {
+function LoginForm() {
+  const searchParams = useSearchParams();
+  const role: 'BARBER' | 'CLIENT' = searchParams.get('role') === 'barbeiro' ? 'BARBER' : 'CLIENT';
+
   const [tab, setTab] = useState<'LOGIN' | 'SIGNUP'>('LOGIN');
-  const [role, setRole] = useState<'BARBER' | 'CLIENT'>('BARBER');
-  
+
   const [name, setName] = useState('');
-  const [email, setEmail] = useState('joao@barbearia.com');
-  const [password, setPassword] = useState('hashed123'); // usando o mock do seeder
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [birthDate, setBirthDate] = useState('');
-  
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
@@ -23,16 +25,16 @@ export default function Login() {
     setError('');
 
     const endpoint = tab === 'LOGIN' ? '/auth/login' : '/auth/signup';
-    
+
     try {
       const response = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          name, 
-          email, 
-          pass: password, 
-          ...(tab === 'SIGNUP' && { birthDate: birthDate || undefined }) 
+        body: JSON.stringify({
+          name,
+          email,
+          pass: password,
+          ...(tab === 'SIGNUP' && { birthDate: birthDate || undefined })
         })
       });
 
@@ -47,12 +49,11 @@ export default function Login() {
           localStorage.setItem('user_role', data.user.role);
           localStorage.setItem('is_admin', data.user.isAdmin);
           localStorage.setItem('user_name', data.user.name);
-          
+
           if (data.user.role === 'BARBER') {
             router.push('/dashboard');
           } else {
-            // Volta pra Home ou vai pra Minhas Reservas
-            router.push('/');
+            router.push('/reservas');
           }
         }
       } else {
@@ -65,49 +66,25 @@ export default function Login() {
     }
   };
 
-  const handleRoleSwitch = (newRole: 'BARBER' | 'CLIENT') => {
-    setRole(newRole);
-    setTab('LOGIN');
-    if (newRole === 'BARBER') {
-      setEmail('joao@barbearia.com');
-      setPassword('hashed123');
-    } else {
-      setEmail('');
-      setPassword('');
-    }
-  };
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-neutral-950 text-neutral-200 font-sans p-6 selection:bg-amber-500/30">
       <div className="w-full max-w-md rounded-3xl border border-neutral-800 bg-neutral-900/50 p-8 shadow-2xl backdrop-blur-md">
-        
+
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-amber-500 shadow-[0_0_20px_rgba(245,158,11,0.3)]">
             <span className="text-2xl font-black text-neutral-950">GB</span>
           </div>
           <h1 className="text-3xl font-extrabold text-white tracking-tight">Gerente Barber</h1>
-          
-          <div className="mt-6 flex justify-center gap-2 p-1 bg-neutral-950 rounded-lg border border-neutral-800">
-            <button 
-              onClick={() => handleRoleSwitch('CLIENT')}
-              className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-md transition-colors ${role === 'CLIENT' ? 'bg-amber-500 text-neutral-950' : 'text-neutral-500 hover:text-white'}`}
-            >
-              Sou Cliente
-            </button>
-            <button 
-              onClick={() => handleRoleSwitch('BARBER')}
-              className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-md transition-colors ${role === 'BARBER' ? 'bg-amber-500 text-neutral-950' : 'text-neutral-500 hover:text-white'}`}
-            >
-              Sou Barbeiro
-            </button>
-          </div>
+          <p className="mt-2 text-xs font-bold uppercase tracking-widest text-amber-500">
+            {role === 'BARBER' ? 'Área do Profissional' : 'Portal do Cliente'}
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
           {tab === 'SIGNUP' && (
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Seu Nome</label>
-              <input 
+              <input
                 type="text"
                 value={name}
                 onChange={e => setName(e.target.value)}
@@ -120,7 +97,7 @@ export default function Login() {
 
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">E-mail</label>
-            <input 
+            <input
               type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
@@ -132,7 +109,7 @@ export default function Login() {
 
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Senha</label>
-            <input 
+            <input
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
@@ -145,7 +122,7 @@ export default function Login() {
           {tab === 'SIGNUP' && (
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Data de Nascimento</label>
-              <input 
+              <input
                 type="date"
                 value={birthDate}
                 onChange={e => setBirthDate(e.target.value)}
@@ -160,7 +137,7 @@ export default function Login() {
             </div>
           )}
 
-          <button 
+          <button
             type="submit"
             disabled={loading}
             className="mt-2 w-full rounded-xl bg-amber-500 px-4 py-4 text-sm font-bold text-neutral-950 transition-all hover:bg-amber-400 hover:scale-[1.02] active:scale-95 shadow-[0_0_20px_rgba(245,158,11,0.3)] disabled:opacity-50 disabled:pointer-events-none"
@@ -171,7 +148,7 @@ export default function Login() {
 
         {role === 'CLIENT' && (
           <div className="mt-6 text-center">
-            <button 
+            <button
               onClick={() => setTab(tab === 'LOGIN' ? 'SIGNUP' : 'LOGIN')}
               className="text-xs font-medium text-neutral-400 hover:text-amber-500 transition-colors"
             >
@@ -181,5 +158,13 @@ export default function Login() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function Login() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }
