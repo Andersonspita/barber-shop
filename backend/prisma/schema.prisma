@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  CLIENT
+  BARBER
+  ADMIN
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model User {
+  id                 String        @id @default(uuid())
+  name               String
+  email              String        @unique
+  passwordHash       String
+  phoneNumber        String?
+  birthDate          DateTime?
+  role               Role          @default(CLIENT)
+  isAdmin            Boolean       @default(false)
+  commissionRate     Decimal?      @db.Decimal(5, 2)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  clientAppointments Appointment[]   @relation("ClientAppointments")
+  barberAppointments Appointment[]   @relation("BarberAppointments")
+  barberBlocks       ScheduleBlock[] @relation("BarberBlocks")
+}
+
+model Service {
+  id              String        @id @default(uuid())
+  name            String
+  durationMinutes Int
+  price           Decimal       @db.Decimal(10, 2)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  appointments    Appointment[]
+}
+
+model Appointment {
+  id        String            @id @default(uuid())
+  clientId  String
+  barberId  String
+  serviceId String
+  startTime DateTime
+  endTime   DateTime
+  status    AppointmentStatus @default(SCHEDULED)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  client    User    @relation("ClientAppointments", fields: [clientId], references: [id])
+  barber    User    @relation("BarberAppointments", fields: [barberId], references: [id])
+  service   Service @relation(fields: [serviceId], references: [id])
+
+  // Opcional: Índice para otimizar as buscas por horário e barbeiro
+  @@index([barberId, startTime, endTime])
+}
+
+model ScheduleBlock {
+  id        String   @id @default(uuid())
+  barberId  String
+  startTime DateTime
+  endTime   DateTime
+  reason    String?
+  createdAt DateTime @default(now())
+
+  barber    User     @relation("BarberBlocks", fields: [barberId], references: [id])
+}
