@@ -10,6 +10,7 @@ import { ServicesModule } from './services/services.module';
 import { AdminClientsModule } from './admin-clients/admin-clients.module';
 import { AdminBarbersModule } from './admin-barbers/admin-barbers.module';
 import { ScheduleBlocksModule } from './schedule-blocks/schedule-blocks.module';
+import { PublicCatalogModule } from './public-catalog/public-catalog.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { ScheduleBlocksModule } from './schedule-blocks/schedule-blocks.module';
     AdminClientsModule,
     AdminBarbersModule,
     ScheduleBlocksModule,
+    PublicCatalogModule,
     BullModule.forRoot({
       connection: {
         host: process.env.REDIS_HOST || 'localhost',

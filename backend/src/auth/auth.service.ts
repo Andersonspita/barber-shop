@@ -1,6 +1,9 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+
+const SALT_ROUNDS = 10;
 
 @Injectable()
 export class AuthService {
@@ -11,9 +14,8 @@ export class AuthService {
 
   async login(email: string, pass: string) {
     const user = await this.prisma.user.findUnique({ where: { email } });
-    
-    // Comparação simples para fins de MVP (use bcrypt num ambiente real completo)
-    if (!user || user.passwordHash !== pass) {
+
+    if (!user || !(await bcrypt.compare(pass, user.passwordHash))) {
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
@@ -39,7 +41,7 @@ export class AuthService {
       data: {
         name,
         email,
-        passwordHash: pass,
+        passwordHash: await bcrypt.hash(pass, SALT_ROUNDS),
         birthDate: birthDate ? new Date(birthDate) : null,
         role: 'CLIENT',
       },
@@ -61,13 +63,13 @@ export class AuthService {
 
   async changePassword(email: string, currentPass: string, newPass: string) {
     const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user || user.passwordHash !== currentPass) {
+    if (!user || !(await bcrypt.compare(currentPass, user.passwordHash))) {
       throw new UnauthorizedException('Senha atual incorreta.');
     }
 
     await this.prisma.user.update({
       where: { email },
-      data: { passwordHash: newPass }
+      data: { passwordHash: await bcrypt.hash(newPass, SALT_ROUNDS) }
     });
 
     return { message: 'Senha alterada com sucesso.' };

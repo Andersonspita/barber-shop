@@ -16,14 +16,14 @@ export class ScheduleBlocksController {
     let targetBarberId = body.barberId;
     if (!targetBarberId) {
       if (req.user.role === 'BARBER') {
-        targetBarberId = req.user.sub as string;
+        targetBarberId = req.user.id as string;
       } else {
         throw new BadRequestException('barberId é obrigatório para admin');
       }
     }
 
     // Apenas admin pode bloquear para outros
-    if (targetBarberId !== req.user.sub && !req.user.isAdmin) {
+    if (targetBarberId !== req.user.id && !req.user.isAdmin) {
       throw new BadRequestException('Acesso negado');
     }
 
@@ -39,7 +39,7 @@ export class ScheduleBlocksController {
   async getBlocks(@Query('barberId') barberId: string, @Query('start') start: string, @Query('end') end: string, @Request() req: any) {
     let targetBarberId = barberId;
     if (!targetBarberId && req.user.role === 'BARBER') {
-      targetBarberId = req.user.sub as string;
+      targetBarberId = req.user.id as string;
     }
     
     if (!targetBarberId) throw new BadRequestException('barberId é obrigatório');
@@ -52,6 +52,6 @@ export class ScheduleBlocksController {
 
   @Delete(':id')
   async deleteBlock(@Param('id') id: string, @Request() req: any) {
-    return this.scheduleBlocksService.deleteBlock(id, req.user.sub, req.user.isAdmin);
+    return this.scheduleBlocksService.deleteBlock(id, req.user.id, req.user.isAdmin);
   }
 }

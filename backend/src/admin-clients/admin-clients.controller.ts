@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Request, BadRequestException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Controller('admin/clients')
@@ -40,7 +41,7 @@ export class AdminClientsController {
         email: body.email,
         phoneNumber: body.phoneNumber || null,
         birthDate: body.birthDate ? new Date(body.birthDate) : null,
-        passwordHash: genericPassword,
+        passwordHash: await bcrypt.hash(genericPassword, 10),
         role: 'CLIENT',
       },
       select: {

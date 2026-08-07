@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { Pool } from 'pg';
+import * as bcrypt from 'bcrypt';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 
@@ -8,6 +9,8 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
+  const passwordHash = await bcrypt.hash('hashed123', 10);
+
   // Limpar tabelas para rodar múltiplas vezes
   await prisma.appointment.deleteMany();
   await prisma.service.deleteMany();
@@ -27,7 +30,7 @@ async function main() {
     data: {
       name: 'João Barbeiro',
       email: 'joao@barbearia.com',
-      passwordHash: 'hashed123',
+      passwordHash,
       role: 'BARBER',
       isAdmin: true,
     },
@@ -38,7 +41,7 @@ async function main() {
     data: {
       name: 'Visitante (Web)',
       email: 'visitante@web.com',
-      passwordHash: 'hashed123',
+      passwordHash,
       role: 'CLIENT',
     },
   });
