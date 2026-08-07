@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
+import { API_URL } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -28,7 +29,7 @@ export default function MinhasReservas() {
     }
 
     try {
-      const response = await fetch('http://localhost:3333/appointments/me', {
+      const response = await fetch(`${API_URL}/appointments/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
@@ -61,7 +62,7 @@ export default function MinhasReservas() {
     if (!token) return;
 
     try {
-      const res = await fetch(`http://localhost:3333/appointments/${id}/status`, {
+      const res = await fetch(`${API_URL}/appointments/${id}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -200,7 +201,7 @@ export default function MinhasReservas() {
               if (!token) return;
 
               try {
-                const res = await fetch('http://localhost:3333/auth/change-password', {
+                const res = await fetch(`${API_URL}/auth/change-password`, {
                   method: 'POST',
                   headers: { 
                     'Content-Type': 'application/json',

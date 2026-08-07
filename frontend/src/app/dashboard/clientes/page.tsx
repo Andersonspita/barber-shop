@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
+import { API_URL } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
 interface Client {
@@ -42,7 +43,7 @@ export default function GerenciarClientes() {
     }
 
     try {
-      const res = await fetch('http://localhost:3333/admin/clients', {
+      const res = await fetch(`${API_URL}/admin/clients`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -73,8 +74,8 @@ export default function GerenciarClientes() {
     const token = localStorage.getItem('access_token');
     
     const url = isEditing 
-      ? `http://localhost:3333/admin/clients/${currentId}` 
-      : 'http://localhost:3333/admin/clients';
+      ? `${API_URL}/admin/clients/${currentId}` 
+      : `${API_URL}/admin/clients`;
     
     const method = isEditing ? 'PUT' : 'POST';
 
@@ -120,7 +121,7 @@ export default function GerenciarClientes() {
     
     const token = localStorage.getItem('access_token');
     try {
-      const res = await fetch(`http://localhost:3333/admin/clients/${id}`, {
+      const res = await fetch(`${API_URL}/admin/clients/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -142,7 +143,7 @@ export default function GerenciarClientes() {
     setIsHistoryModalOpen(true);
     
     try {
-      const res = await fetch(`http://localhost:3333/admin/clients/${id}/history`, {
+      const res = await fetch(`${API_URL}/admin/clients/${id}/history`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import { API_URL } from '@/lib/api';
 import { format, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -40,8 +41,8 @@ export default function LandingPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch('http://localhost:3333/services').then(res => res.json()),
-      fetch('http://localhost:3333/barbers').then(res => res.json())
+      fetch(`${API_URL}/services`).then(res => res.json()),
+      fetch(`${API_URL}/barbers`).then(res => res.json())
     ])
       .then(([servicesData, barbersData]) => {
         setServices(Array.isArray(servicesData) ? servicesData : []);
@@ -64,7 +65,7 @@ export default function LandingPage() {
       setSlotsLoading(true);
       setSelectedTimeSlot(null);
       try {
-        let url = `http://localhost:3333/appointments/availability?date=${selectedDate}&serviceId=${serviceId}`;
+        let url = `${API_URL}/appointments/availability?date=${selectedDate}&serviceId=${serviceId}`;
         if (barberId) url += `&barberId=${barberId}`;
         
         const response = await fetch(url);
@@ -97,7 +98,7 @@ export default function LandingPage() {
     setMessage('');
     
     try {
-      const response = await fetch('http://localhost:3333/appointments/dynamic', {
+      const response = await fetch(`${API_URL}/appointments/dynamic`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

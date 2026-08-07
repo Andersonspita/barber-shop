@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
+import { API_URL } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -56,8 +57,8 @@ export default function Dashboard() {
     try {
       // Fetch agenda e métricas em paralelo
       const [apptsRes, metricsRes] = await Promise.all([
-        fetch('http://localhost:3333/appointments/me', { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch('http://localhost:3333/appointments/metrics/today', { headers: { 'Authorization': `Bearer ${token}` } })
+        fetch(`${API_URL}/appointments/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${API_URL}/appointments/metrics/today`, { headers: { 'Authorization': `Bearer ${token}` } })
       ]);
 
       if (!apptsRes.ok || !metricsRes.ok) {
@@ -91,7 +92,7 @@ export default function Dashboard() {
     if (!token) return;
 
     try {
-      const res = await fetch(`http://localhost:3333/appointments/${id}/status`, {
+      const res = await fetch(`${API_URL}/appointments/${id}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -123,7 +124,7 @@ export default function Dashboard() {
     if (!token) return;
 
     try {
-      const res = await fetch(`http://localhost:3333/schedule-blocks`, {
+      const res = await fetch(`${API_URL}/schedule-blocks`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
