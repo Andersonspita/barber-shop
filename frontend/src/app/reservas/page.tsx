@@ -54,6 +54,12 @@ export default function MinhasReservas() {
     fetchAppointments();
   }, [router]);
 
+  const handleLogout = () => {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('user_role');
+    router.push('/login?role=cliente');
+  };
+
   const handleCancel = async (id: string) => {
     const confirmCancel = confirm("Tem certeza que deseja cancelar este agendamento?");
     if (!confirmCancel) return;
@@ -92,9 +98,9 @@ export default function MinhasReservas() {
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans">
       <header className="sticky top-0 z-50 border-b border-neutral-800 bg-neutral-950/90 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-6">
+        <div className="mx-auto flex max-w-4xl flex-col gap-3 px-4 py-3 sm:h-16 sm:flex-row sm:items-center sm:justify-between sm:gap-0 sm:px-6 sm:py-0">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500 text-neutral-950 font-black text-sm">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-neutral-950 font-black text-sm">
               GB
             </div>
             <div>
@@ -102,12 +108,26 @@ export default function MinhasReservas() {
               <span className="text-xs text-neutral-500">Minhas Reservas</span>
             </div>
           </div>
-          <button 
-            onClick={() => router.push('/reservas/nova')}
-            className="text-xs font-bold uppercase tracking-wider text-amber-500 hover:text-amber-400 transition-colors"
-          >
-            Novo Agendamento
-          </button>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:flex-nowrap sm:justify-end">
+            <button
+              onClick={() => router.push('/reservas/nova')}
+              className="text-xs font-bold uppercase tracking-wider text-amber-500 hover:text-amber-400 transition-colors"
+            >
+              Novo Agendamento
+            </button>
+            <button
+              onClick={() => router.push('/reservas/configuracoes')}
+              className="text-xs font-bold uppercase tracking-wider text-neutral-400 hover:text-white transition-colors"
+            >
+              ⚙️ Configurações
+            </button>
+            <button
+              onClick={handleLogout}
+              className="text-xs font-bold uppercase tracking-wider text-neutral-400 hover:text-red-400 transition-colors"
+            >
+              Sair
+            </button>
+          </div>
         </div>
       </header>
 
@@ -184,74 +204,6 @@ export default function MinhasReservas() {
             })}
           </div>
         )}
-
-        <section className="mt-12 rounded-3xl border border-neutral-800 bg-neutral-900/50 p-6 md:p-8">
-          <h3 className="text-lg font-bold text-white mb-4">Segurança da Conta</h3>
-          <p className="text-sm text-neutral-400 mb-6">Altere sua senha para manter sua conta segura.</p>
-          
-          <form 
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const target = e.target as typeof e.target & {
-                current: { value: string };
-                newpass: { value: string };
-              };
-              
-              const token = localStorage.getItem('access_token');
-              if (!token) return;
-
-              try {
-                const res = await fetch(`${API_URL}/auth/change-password`, {
-                  method: 'POST',
-                  headers: { 
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}` 
-                  },
-                  body: JSON.stringify({
-                    currentPass: target.current.value,
-                    newPass: target.newpass.value
-                  })
-                });
-
-                const data = await res.json();
-                if (res.ok) {
-                  alert('Senha alterada com sucesso!');
-                  target.current.value = '';
-                  target.newpass.value = '';
-                } else {
-                  alert(data.message || 'Falha ao alterar senha.');
-                }
-              } catch (err) {
-                console.error(err);
-                alert('Erro de comunicação.');
-              }
-            }}
-            className="flex flex-col md:flex-row gap-4 items-end"
-          >
-            <div className="flex-1 w-full">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Senha Atual</label>
-              <input 
-                type="password" name="current" required
-                className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-3 text-sm text-white focus:border-amber-500 focus:outline-none"
-                placeholder="••••••••"
-              />
-            </div>
-            <div className="flex-1 w-full">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Nova Senha</label>
-              <input 
-                type="password" name="newpass" required
-                className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-3 text-sm text-white focus:border-amber-500 focus:outline-none"
-                placeholder="••••••••"
-              />
-            </div>
-            <button 
-              type="submit"
-              className="w-full md:w-auto px-6 py-3 rounded-xl bg-neutral-800 text-sm font-bold text-white hover:bg-neutral-700 transition-colors"
-            >
-              Atualizar Senha
-            </button>
-          </form>
-        </section>
       </main>
     </div>
   );
