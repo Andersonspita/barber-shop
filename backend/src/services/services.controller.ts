@@ -1,49 +1,70 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Request, BadRequestException } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AdminOnly } from '../common/roles.guard';
+import { UpsertServiceDto } from './dto';
 
+@AdminOnly()
 @Controller('admin/services')
 export class ServicesController {
   constructor(private readonly prisma: PrismaService) {}
 
-  @UseGuards(AuthGuard('jwt'))
   @Get()
-  async getAllServices(@Request() req: any) {
-    if (!req.user.isAdmin) throw new BadRequestException('Acesso negado');
-    return this.prisma.service.findMany({ orderBy: { name: 'asc' } });
+  async list() {
+    return this.prisma.service.findMany({
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      include: { _count: { select: { appointments: true } } },
+    });
   }
 
-  @UseGuards(AuthGuard('jwt'))
   @Post()
-  async createService(@Body() body: { name: string; durationMinutes: number; price: number }, @Request() req: any) {
-    if (!req.user.isAdmin) throw new BadRequestException('Acesso negado');
+  async create(@Body() body: UpsertServiceDto) {
     return this.prisma.service.create({
       data: {
-        name: body.name,
-        durationMinutes: Number(body.durationMinutes),
-        price: Number(body.price),
+        name: body.name.trim(),
+        description: body.description?.trim() || null,
+        durationMinutes: body.durationMinutes,
+        price: body.price,
+        isActive: body.isActive ?? true,
       },
     });
   }
 
-  @UseGuards(AuthGuard('jwt'))
   @Put(':id')
-  async updateService(@Param('id') id: string, @Body() body: { name: string; durationMinutes: number; price: number }, @Request() req: any) {
-    if (!req.user.isAdmin) throw new BadRequestException('Acesso negado');
+  async update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: UpsertServiceDto,
+  ) {
     return this.prisma.service.update({
       where: { id },
       data: {
-        name: body.name,
-        durationMinutes: Number(body.durationMinutes),
-        price: Number(body.price),
+        name: body.name.trim(),
+        description: body.description?.trim() || null,
+        durationMinutes: body.durationMinutes,
+        price: body.price,
+        isActive: body.isActive ?? true,
       },
     });
   }
 
-  @UseGuards(AuthGuard('jwt'))
+  /**
+   * Desativa em vez de excluir. Um serviço já usado em agendamentos não pode
+   * sumir sem levar o histórico junto — inativo, ele some da vitrine e da
+   * tela de agendamento, e o passado continua auditável.
+   */
   @Delete(':id')
-  async deleteService(@Param('id') id: string, @Request() req: any) {
-    if (!req.user.isAdmin) throw new BadRequestException('Acesso negado');
-    return this.prisma.service.delete({ where: { id } });
+  async deactivate(@Param('id', ParseUUIDPipe) id: string) {
+    return this.prisma.service.update({
+      where: { id },
+      data: { isActive: false },
+    });
   }
 }

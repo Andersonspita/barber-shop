@@ -1,4 +1,11 @@
-import { Injectable, BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -52,12 +59,14 @@ export class ScheduleBlocksService {
   }
 
   async getBlocks(barberId: string, start?: Date, end?: Date) {
-    const where: any = { barberId };
-    
-    if (start && end) {
-      where.startTime = { gte: start };
-      where.endTime = { lte: end };
-    }
+    // Filtro por sobreposição: um bloqueio que começa antes da janela e
+    // termina dentro dela precisa aparecer.
+    const where: Prisma.ScheduleBlockWhereInput = {
+      barberId,
+      ...(start && end
+        ? { startTime: { lt: end }, endTime: { gt: start } }
+        : {}),
+    };
 
     return this.prisma.scheduleBlock.findMany({
       where,
@@ -67,10 +76,10 @@ export class ScheduleBlocksService {
 
   async deleteBlock(id: string, barberId: string, isAdmin: boolean) {
     const block = await this.prisma.scheduleBlock.findUnique({ where: { id } });
-    if (!block) throw new BadRequestException('Bloqueio não encontrado.');
-    
+    if (!block) throw new NotFoundException('Bloqueio não encontrado.');
+
     if (!isAdmin && block.barberId !== barberId) {
-      throw new ConflictException('Sem permissão para remover este bloqueio.');
+      throw new ForbiddenException('Sem permissão para remover este bloqueio.');
     }
 
     return this.prisma.scheduleBlock.delete({ where: { id } });

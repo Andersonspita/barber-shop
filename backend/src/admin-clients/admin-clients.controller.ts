@@ -1,130 +1,193 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Request, BadRequestException } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  NotFoundException,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AdminOnly } from '../common/roles.guard';
+import { generateTemporaryPassword } from '../common/password.util';
+import { CreateClientDto, ListClientsQueryDto, UpdateClientDto } from './dto';
 
+const CLIENT_FIELDS = {
+  id: true,
+  name: true,
+  email: true,
+  phoneNumber: true,
+  birthDate: true,
+  isActive: true,
+  createdAt: true,
+} as const;
+
+@AdminOnly()
 @Controller('admin/clients')
 export class AdminClientsController {
   constructor(private readonly prisma: PrismaService) {}
 
-  @UseGuards(AuthGuard('jwt'))
   @Get()
-  async getAllClients(@Request() req: any) {
-    if (!req.user.isAdmin) throw new BadRequestException('Acesso negado');
-    return this.prisma.user.findMany({ 
-      where: { role: 'CLIENT' },
-      orderBy: { name: 'asc' },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phoneNumber: true,
-        createdAt: true,
-      }
-    });
+  async list(@Query() query: ListClientsQueryDto) {
+    const page = Math.max(1, query.page ?? 1);
+    const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 50));
+    const search = query.search?.trim();
+
+    const where: Prisma.UserWhereInput = {
+      role: 'CLIENT',
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' } },
+              { email: { contains: search, mode: 'insensitive' } },
+              { phoneNumber: { contains: search } },
+            ],
+          }
+        : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        select: CLIENT_FIELDS,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return { items, total, page, pageSize };
   }
 
-  @UseGuards(AuthGuard('jwt'))
   @Post()
-  async createClient(@Body() body: { name: string; email: string; phoneNumber?: string; birthDate?: string }, @Request() req: any) {
-    if (!req.user.isAdmin) throw new BadRequestException('Acesso negado');
-    
-    // Senha genérica para clientes cadastrados pelo admin
-    const genericPassword = 'Mudar@123';
+  async create(@Body() body: CreateClientDto) {
+    const email =
+      body.email?.trim().toLowerCase() ||
+      `balcao.${Date.now().toString(36)}@local.invalid`;
 
-    const exists = await this.prisma.user.findUnique({ where: { email: body.email } });
-    if (exists) throw new BadRequestException('E-mail já cadastrado.');
+    await this.assertEmailAvailable(email);
 
-    return this.prisma.user.create({
+    const temporaryPassword = generateTemporaryPassword();
+    const client = await this.prisma.user.create({
       data: {
-        name: body.name,
-        email: body.email,
-        phoneNumber: body.phoneNumber || null,
-        birthDate: body.birthDate ? new Date(body.birthDate) : null,
-        passwordHash: await bcrypt.hash(genericPassword, 10),
+        name: body.name.trim(),
+        email,
+        phoneNumber: body.phoneNumber?.trim() || null,
+        birthDate: parseDate(body.birthDate),
+        passwordHash: await bcrypt.hash(temporaryPassword, 10),
         role: 'CLIENT',
+        mustChangePassword: true,
       },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phoneNumber: true,
-        birthDate: true,
-      }
+      select: CLIENT_FIELDS,
     });
+
+    return { ...client, temporaryPassword };
   }
 
-  @UseGuards(AuthGuard('jwt'))
   @Put(':id')
-  async updateClient(@Param('id') id: string, @Body() body: { name: string; email: string; phoneNumber?: string; birthDate?: string }, @Request() req: any) {
-    if (!req.user.isAdmin) throw new BadRequestException('Acesso negado');
+  async update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: UpdateClientDto,
+  ) {
+    if (body.email) await this.assertEmailAvailable(body.email, id);
+
     return this.prisma.user.update({
       where: { id },
       data: {
-        name: body.name,
-        email: body.email,
-        phoneNumber: body.phoneNumber || null,
-        birthDate: body.birthDate ? new Date(body.birthDate) : null,
+        name: body.name.trim(),
+        ...(body.email ? { email: body.email.trim().toLowerCase() } : {}),
+        phoneNumber: body.phoneNumber?.trim() || null,
+        birthDate: parseDate(body.birthDate),
+        isActive: body.isActive ?? true,
       },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phoneNumber: true,
-      }
+      select: CLIENT_FIELDS,
     });
   }
 
-  @UseGuards(AuthGuard('jwt'))
+  /** Desativa em vez de excluir: o histórico sustenta o relatório financeiro. */
   @Delete(':id')
-  async deleteClient(@Param('id') id: string, @Request() req: any) {
-    if (!req.user.isAdmin) throw new BadRequestException('Acesso negado');
-    return this.prisma.user.delete({ 
+  async deactivate(@Param('id', ParseUUIDPipe) id: string) {
+    return this.prisma.user.update({
       where: { id },
-      select: { id: true }
+      data: { isActive: false },
+      select: CLIENT_FIELDS,
     });
   }
 
-  @UseGuards(AuthGuard('jwt'))
-  @Get(':id/history')
-  async getClientHistory(@Param('id') id: string, @Request() req: any) {
-    if (!req.user.isAdmin) throw new BadRequestException('Acesso negado');
-    
-    const client = await this.prisma.user.findUnique({
-      where: { id, role: 'CLIENT' },
-      select: { name: true, email: true, phoneNumber: true, createdAt: true }
+  @Patch(':id/reactivate')
+  async reactivate(@Param('id', ParseUUIDPipe) id: string) {
+    return this.prisma.user.update({
+      where: { id },
+      data: { isActive: true },
+      select: CLIENT_FIELDS,
     });
+  }
 
-    if (!client) throw new BadRequestException('Cliente não encontrado');
+  @Post(':id/reset-password')
+  async resetPassword(@Param('id', ParseUUIDPipe) id: string) {
+    const temporaryPassword = generateTemporaryPassword();
+    await this.prisma.user.update({
+      where: { id },
+      data: {
+        passwordHash: await bcrypt.hash(temporaryPassword, 10),
+        mustChangePassword: true,
+      },
+    });
+    return { temporaryPassword };
+  }
+
+  @Get(':id/history')
+  async history(@Param('id', ParseUUIDPipe) id: string) {
+    const client = await this.prisma.user.findFirst({
+      where: { id, role: 'CLIENT' },
+      select: CLIENT_FIELDS,
+    });
+    if (!client) throw new NotFoundException('Cliente não encontrado.');
 
     const appointments = await this.prisma.appointment.findMany({
       where: { clientId: id },
       include: {
-        service: { select: { name: true, price: true } },
-        barber: { select: { name: true } }
+        service: { select: { name: true } },
+        barber: { select: { name: true } },
+        review: { select: { rating: true, comment: true } },
       },
-      orderBy: { startTime: 'desc' }
+      orderBy: { startTime: 'desc' },
+      take: 200,
     });
 
     let totalSpent = 0;
     let completedCount = 0;
+    let cancelledCount = 0;
     let noShowCount = 0;
 
-    const history = appointments.map(appt => {
+    const history = appointments.map((appt) => {
       if (appt.status === 'COMPLETED') {
         completedCount++;
-        totalSpent += Number(appt.service.price);
-      } else if (appt.status === 'NO_SHOW' || appt.status === 'CANCELLED') {
+        totalSpent += Number(appt.priceCharged);
+      } else if (appt.status === 'NO_SHOW') {
+        // Falta e cancelamento são coisas diferentes: uma custa a cadeira
+        // vazia, a outra devolve o horário para outro cliente.
         noShowCount++;
+      } else if (appt.status === 'CANCELLED') {
+        cancelledCount++;
       }
 
       return {
         id: appt.id,
         date: appt.startTime,
         service: appt.service.name,
-        price: Number(appt.service.price),
-        barber: appt.barber?.name || 'Desconhecido',
-        status: appt.status
+        price: Number(appt.priceCharged),
+        barber: appt.barber?.name ?? 'Desconhecido',
+        status: appt.status,
+        rating: appt.review?.rating ?? null,
       };
     });
 
@@ -133,10 +196,31 @@ export class AdminClientsController {
       metrics: {
         totalSpent,
         completedCount,
+        cancelledCount,
         noShowCount,
-        totalAppointments: appointments.length
+        totalAppointments: appointments.length,
+        ticketAverage: completedCount > 0 ? totalSpent / completedCount : 0,
       },
-      history
+      history,
     };
   }
+
+  private async assertEmailAvailable(email: string, exceptId?: string) {
+    const existing = await this.prisma.user.findUnique({
+      where: { email: email.trim().toLowerCase() },
+      select: { id: true },
+    });
+    if (existing && existing.id !== exceptId) {
+      throw new BadRequestException('Este e-mail já está cadastrado.');
+    }
+  }
+}
+
+function parseDate(value?: string): Date | null {
+  if (!value) return null;
+  const date = new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) {
+    throw new BadRequestException('Data de nascimento inválida.');
+  }
+  return date;
 }

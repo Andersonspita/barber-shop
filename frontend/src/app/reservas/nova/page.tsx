@@ -1,319 +1,584 @@
-"use client";
+'use client';
 
-import React, { Suspense, useEffect, useState } from 'react';
-import { API_URL } from '@/lib/api';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { format, addDays } from 'date-fns';
-
-interface TimeSlot {
-  time: string;
-  available: boolean;
-  dateTime: string;
-}
+import React, { Suspense, useCallback, useState } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import {
+  BellRing,
+  CalendarPlus,
+  CalendarX2,
+  CheckCircle2,
+  Clock,
+  Scissors,
+  User,
+} from 'lucide-react';
+import { ApiError, api } from '@/lib/api';
+import { useSession } from '@/lib/use-session';
+import { useAsyncData } from '@/lib/use-async-data';
+import {
+  addDaysISO,
+  formatBRL,
+  formatDateLong,
+  formatDuration,
+  formatTime,
+  todayISO,
+} from '@/lib/format';
+import { buildCalendarEvent, downloadCalendarEvent } from '@/lib/calendar';
+import { CLIENT_NAV } from '@/lib/nav';
+import { AppHeader, PageHeading } from '@/components/app-header';
+import { Button, ButtonLink } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Field, Select, Textarea } from '@/components/ui/field';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useToast } from '@/components/ui/toast';
+import { cn } from '@/lib/cn';
 
 interface Service {
   id: string;
   name: string;
+  description: string | null;
   durationMinutes: number;
-  price: number;
+  price: string | number;
 }
 
 interface Barber {
   id: string;
   name: string;
+  photoUrl: string | null;
 }
 
-function NovoAgendamentoForm() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const preselectedServiceId = searchParams.get('serviceId');
+interface Slot {
+  time: string;
+  dateTime: string;
+  available: boolean;
+  barberIds: string[];
+}
 
-  const [checkingAuth, setCheckingAuth] = useState(true);
+interface BookedAppointment {
+  id: string;
+  startTime: string;
+  endTime: string;
+  priceCharged: string | number;
+  service: { name: string; durationMinutes: number };
+  barber: { name: string };
+}
 
-  const [services, setServices] = useState<Service[]>([]);
-  const [serviceId, setServiceId] = useState('');
+function NewBookingPage() {
+  const params = useSearchParams();
+  const toast = useToast();
+  const { ready } = useSession('CLIENT');
 
-  const [barbers, setBarbers] = useState<Barber[]>([]);
-  const [barberId, setBarberId] = useState('');
+  const [chosenServiceId, setChosenServiceId] = useState('');
+  const [barberId, setBarberId] = useState(params.get('barberId') ?? '');
+  const [date, setDate] = useState(todayISO());
+  const [notes, setNotes] = useState('');
+  const [selected, setSelected] = useState<Slot | null>(null);
 
-  const [loading, setLoading] = useState(true);
-  const [slotsLoading, setSlotsLoading] = useState(false);
   const [booking, setBooking] = useState(false);
-  const [message, setMessage] = useState('');
+  const [confirmed, setConfirmed] = useState<BookedAppointment | null>(null);
+  const [waitlisted, setWaitlisted] = useState(false);
 
-  const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [availableSlots, setAvailableSlots] = useState<TimeSlot[]>([]);
-  const [selectedTimeSlot, setSelectedTimeSlot] = useState<TimeSlot | null>(null);
+  const preselectedService = params.get('serviceId');
 
-  useEffect(() => {
-    const token = localStorage.getItem('access_token');
-    const role = localStorage.getItem('user_role');
-    if (!token || role !== 'CLIENT') {
-      router.push('/login?role=cliente');
-      return;
-    }
-    setCheckingAuth(false);
-  }, [router]);
+  const fetchCatalog = useCallback(async () => {
+    if (!ready) return null;
+    const [serviceList, barberList] = await Promise.all([
+      api<Service[]>('/services'),
+      api<Barber[]>('/barbers'),
+    ]);
+    return { services: serviceList, barbers: barberList };
+  }, [ready]);
 
-  useEffect(() => {
-    if (checkingAuth) return;
-    Promise.all([
-      fetch(`${API_URL}/services`).then(res => res.json()),
-      fetch(`${API_URL}/barbers`).then(res => res.json())
-    ])
-      .then(([servicesData, barbersData]) => {
-        setServices(Array.isArray(servicesData) ? servicesData : []);
-        if (Array.isArray(servicesData) && servicesData.length > 0) {
-          const preselected = preselectedServiceId && servicesData.some((s: Service) => s.id === preselectedServiceId);
-          setServiceId(preselected ? preselectedServiceId! : servicesData[0].id);
-        }
-        setBarbers(Array.isArray(barbersData) ? barbersData : []);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error('Error fetching data', err);
-        setLoading(false);
-      });
-  }, [checkingAuth]);
+  const { data: catalog, loading: catalogLoading } = useAsyncData(fetchCatalog);
+  const services = catalog?.services ?? [];
+  const barbers = catalog?.barbers ?? [];
 
-  useEffect(() => {
-    if (!serviceId) return;
+  // A escolha do usuário vence; sem ela, vale o serviço da URL e, na falta
+  // dele, o primeiro do catálogo.
+  const serviceId =
+    chosenServiceId ||
+    (preselectedService && services.some((s) => s.id === preselectedService)
+      ? preselectedService
+      : (services[0]?.id ?? ''));
 
-    const fetchAvailability = async () => {
-      setSlotsLoading(true);
-      setSelectedTimeSlot(null);
-      try {
-        let url = `${API_URL}/appointments/availability?date=${selectedDate}&serviceId=${serviceId}`;
-        if (barberId) url += `&barberId=${barberId}`;
+  const fetchSlots = useCallback(
+    () =>
+      serviceId
+        ? api<Slot[]>('/appointments/availability', {
+            query: { date, serviceId, barberId: barberId || undefined },
+          })
+        : Promise.resolve([]),
+    [date, serviceId, barberId],
+  );
 
-        const response = await fetch(url);
-        if (response.ok) {
-          const data = await response.json();
-          setAvailableSlots(data);
-        }
-      } catch (error) {
-        console.error('Falha ao buscar horários:', error);
-      } finally {
-        setSlotsLoading(false);
-      }
-    };
+  const {
+    data: slotData,
+    loading: slotsLoading,
+    error: slotsError,
+    reload: loadSlots,
+  } = useAsyncData(fetchSlots);
+  const slots = slotData ?? [];
 
-    fetchAvailability();
-  }, [selectedDate, serviceId, barberId]);
+  const service = services.find((s) => s.id === serviceId);
 
   const handleBook = async () => {
-    if (!selectedTimeSlot) return;
-
-    const token = localStorage.getItem('access_token');
-    if (!token) {
-      router.push('/login?role=cliente');
-      return;
-    }
+    if (!selected || !service) return;
 
     setBooking(true);
-    setMessage('');
-
     try {
-      const response = await fetch(`${API_URL}/appointments/dynamic`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+      const result = await api<{ appointment: BookedAppointment }>(
+        '/appointments',
+        {
+          method: 'POST',
+          auth: true,
+          body: {
+            serviceId,
+            startTime: selected.dateTime,
+            barberId: barberId || undefined,
+            notes: notes.trim() || undefined,
+          },
         },
-        body: JSON.stringify({
-          serviceId,
-          startTime: selectedTimeSlot.dateTime,
-          barberId: barberId || undefined
-        })
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        setMessage('🎉 ' + result.message);
-        setAvailableSlots(prev => prev.filter(s => s.time !== selectedTimeSlot.time));
-        setSelectedTimeSlot(null);
-      } else {
-        setMessage('❌ ' + result.message);
-      }
-    } catch (err) {
-      setMessage('❌ Falha de comunicação com o servidor.');
+      );
+      setConfirmed(result.appointment);
+    } catch (caught) {
+      const message =
+        caught instanceof ApiError
+          ? caught.message
+          : 'Não foi possível concluir o agendamento.';
+      toast.error('Agendamento não concluído', message);
+      // O horário pode ter sido tomado por outra pessoa: recarrega a grade.
+      void loadSlots();
     } finally {
       setBooking(false);
     }
   };
 
-  if (checkingAuth) {
-    return null;
+  const handleJoinWaitlist = async () => {
+    try {
+      await api('/waitlist', {
+        method: 'POST',
+        auth: true,
+        body: { serviceId, date, barberId: barberId || undefined },
+      });
+      setWaitlisted(true);
+      toast.success(
+        'Você entrou na lista de espera',
+        'Avisamos no WhatsApp se alguém liberar um horário neste dia.',
+      );
+    } catch (caught) {
+      toast.error(
+        'Não foi possível entrar na lista',
+        caught instanceof ApiError ? caught.message : undefined,
+      );
+    }
+  };
+
+  if (!ready) return null;
+
+  if (confirmed) {
+    return (
+      <>
+        <AppHeader
+          area="Portal do cliente"
+          subtitle="Agendamento confirmado"
+          items={CLIENT_NAV}
+        />
+        <Confirmation
+          appointment={confirmed}
+          onNewBooking={() => {
+            setConfirmed(null);
+            void loadSlots();
+          }}
+        />
+      </>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans">
-      <header className="sticky top-0 z-50 border-b border-neutral-800 bg-neutral-950/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-3 sm:h-16 sm:flex-row sm:items-center sm:justify-between sm:gap-0 sm:px-6 sm:py-0">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-neutral-950 font-black text-sm">
-              GB
-            </div>
-            <div>
-              <h1 className="text-sm font-bold text-white leading-none">Portal do Cliente</h1>
-              <span className="text-xs text-neutral-500">Novo Agendamento</span>
-            </div>
-          </div>
-          <button
-            onClick={() => router.push('/reservas')}
-            className="text-xs font-bold uppercase tracking-wider text-amber-500 hover:text-amber-400 transition-colors"
-          >
-            Minhas Reservas
-          </button>
-        </div>
-      </header>
+    <>
+      <AppHeader
+        area="Portal do cliente"
+        subtitle="Novo agendamento"
+        items={CLIENT_NAV}
+      />
 
-      <main className="mx-auto max-w-6xl px-6 py-8 md:py-12">
-        <div className="mb-8">
-          <h2 className="text-3xl font-extrabold text-white tracking-tight">Reserve sua Cadeira</h2>
-          <p className="text-neutral-400 mt-1">Em poucos passos, seu horário estará garantido.</p>
-        </div>
+      <main id="conteudo" className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+        <PageHeading
+          title="Reserve sua cadeira"
+          description="Escolha o serviço, quem vai te atender e o melhor horário."
+        />
 
-        <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-6 md:p-10 shadow-2xl">
-          <div className="grid gap-12 lg:grid-cols-[1fr_350px]">
+        <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+          <div className="space-y-6">
+            {/* --------------------------------------------------- serviço */}
+            <Card className="p-5 sm:p-6">
+              <StepTitle number={1} icon={Scissors} label="Serviço" />
 
-            {/* Esquerda: Escolhas */}
-            <div className="space-y-10">
-              {/* 1. Serviço */}
-              <div>
-                <h3 className="flex items-center gap-3 text-sm font-bold uppercase tracking-wider text-neutral-300 mb-5">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500 text-neutral-950 text-xs">1</span>
-                  Serviço
-                </h3>
-                {loading ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {[1, 2, 3].map(i => <div key={i} className="h-16 bg-neutral-900 animate-pulse rounded-2xl border border-neutral-800"></div>)}
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {services.map(svc => (
-                      <button
-                        key={svc.id}
-                        onClick={() => setServiceId(svc.id)}
-                        className={`text-left p-4 rounded-2xl border transition-all ${serviceId === svc.id ? 'border-amber-500 bg-amber-500/10' : 'border-neutral-800 bg-neutral-900/50 hover:border-neutral-600'}`}
-                      >
-                        <div className="font-bold text-white mb-1 truncate">{svc.name}</div>
-                        <div className="text-amber-500 text-sm font-semibold">R$ {Number(svc.price).toFixed(2)}</div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 2. Barbeiro & Data */}
-              <div className="grid sm:grid-cols-2 gap-6">
-                <div>
-                  <h3 className="flex items-center gap-3 text-sm font-bold uppercase tracking-wider text-neutral-300 mb-5">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500 text-neutral-950 text-xs">2</span>
-                    Profissional
-                  </h3>
-                  <select
-                    value={barberId}
-                    onChange={(e) => setBarberId(e.target.value)}
-                    className="w-full rounded-2xl border border-neutral-700 bg-neutral-900 px-4 py-4 text-sm font-semibold text-white focus:border-amber-500 focus:outline-none transition-all cursor-pointer appearance-none"
-                  >
-                    <option value="">Qualquer (Mais rápido)</option>
-                    {barbers.map(b => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
-                    ))}
-                  </select>
+              {catalogLoading ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {[0, 1, 2, 3].map((index) => (
+                    <Skeleton key={index} className="h-24" />
+                  ))}
                 </div>
-                <div>
-                  <h3 className="flex items-center gap-3 text-sm font-bold uppercase tracking-wider text-neutral-300 mb-5">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500 text-neutral-950 text-xs">3</span>
-                    Data
-                  </h3>
-                  <input
-                    type="date"
-                    value={selectedDate}
-                    min={format(new Date(), 'yyyy-MM-dd')}
-                    max={format(addDays(new Date(), 30), 'yyyy-MM-dd')}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    className="w-full rounded-2xl border border-neutral-700 bg-neutral-900 px-4 py-4 text-sm font-semibold text-white focus:border-amber-500 focus:outline-none transition-all custom-calendar-icon"
-                    style={{ colorScheme: 'dark' }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Direita: Horários e CTA */}
-            <div className="bg-neutral-950 rounded-3xl p-6 border border-neutral-800 flex flex-col h-full">
-              <h3 className="flex items-center gap-3 text-sm font-bold uppercase tracking-wider text-neutral-300 mb-5">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500 text-neutral-950 text-xs">4</span>
-                Horário
-              </h3>
-
-              <div className="flex-1 min-h-[250px]">
-                {slotsLoading ? (
-                  <div className="flex h-full items-center justify-center text-sm text-amber-500 font-bold animate-pulse">
-                    Buscando agenda...
-                  </div>
-                ) : availableSlots.length === 0 ? (
-                  <div className="flex h-full items-center justify-center text-sm text-neutral-500 text-center px-4">
-                    Tudo lotado para este dia.<br />Selecione outra data.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto pr-2">
-                    {availableSlots.map((slot) => {
-                      const isSelected = selectedTimeSlot?.time === slot.time;
-                      return (
-                        <button
-                          key={slot.time}
-                          disabled={!slot.available || loading}
-                          onClick={() => setSelectedTimeSlot(slot)}
-                          className={`
-                            flex items-center justify-center rounded-xl py-3 text-sm font-bold transition-all
-                            ${!slot.available ? 'bg-neutral-900 text-neutral-800 cursor-not-allowed' : ''}
-                            ${slot.available && !isSelected ? 'border border-neutral-800 bg-neutral-900/50 text-white hover:border-amber-500 hover:bg-amber-500/10 hover:text-amber-400' : ''}
-                            ${isSelected ? 'border-2 border-amber-500 bg-amber-500 text-neutral-950 shadow-[0_0_15px_rgba(245,158,11,0.4)]' : ''}
-                          `}
-                        >
-                          {slot.time}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              <div className="pt-6 mt-4 border-t border-neutral-900">
-                <button
-                  onClick={handleBook}
-                  disabled={loading || booking || !selectedTimeSlot || slotsLoading}
-                  className="w-full rounded-2xl bg-white px-4 py-4 text-[15px] font-black text-neutral-950 transition-all hover:bg-neutral-200 active:scale-95 disabled:opacity-30 disabled:pointer-events-none flex justify-center items-center gap-2"
+              ) : (
+                <div
+                  role="radiogroup"
+                  aria-label="Serviço"
+                  className="grid gap-3 sm:grid-cols-2"
                 >
-                  {booking ? 'Aguarde...' : selectedTimeSlot ? `Confirmar ${selectedTimeSlot.time}` : 'Escolha um horário'}
-                </button>
-                {message && (
-                  <div className="mt-4 text-center text-sm font-bold text-amber-500">
-                    {message}
-                  </div>
-                )}
+                  {services.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={serviceId === item.id}
+                      onClick={() => {
+                        setChosenServiceId(item.id);
+                        setSelected(null);
+                        setWaitlisted(false);
+                      }}
+                      className={cn(
+                        'rounded-xl border p-4 text-left transition-colors',
+                        serviceId === item.id
+                          ? 'border-brand-500 bg-brand-500/10'
+                          : 'border-line bg-surface-2 hover:border-line-strong',
+                      )}
+                    >
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="font-semibold text-ink">
+                          {item.name}
+                        </span>
+                        <span className="shrink-0 text-sm font-bold tabular text-brand-400">
+                          {formatBRL(item.price)}
+                        </span>
+                      </div>
+                      <span className="mt-1 flex items-center gap-1.5 text-xs text-ink-subtle">
+                        <Clock className="h-3 w-3" aria-hidden="true" />
+                        {formatDuration(item.durationMinutes)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            {/* -------------------------------------- profissional e data */}
+            <Card className="p-5 sm:p-6">
+              <StepTitle number={2} icon={User} label="Profissional e dia" />
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Profissional">
+                  {(props) => (
+                    <Select
+                      {...props}
+                      value={barberId}
+                      onChange={(e) => {
+                        setBarberId(e.target.value);
+                        setSelected(null);
+                        setWaitlisted(false);
+                      }}
+                    >
+                      <option value="">Qualquer um disponível</option>
+                      {barbers.map((barber) => (
+                        <option key={barber.id} value={barber.id}>
+                          {barber.name}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </Field>
+
+                <Field label="Data">
+                  {(props) => (
+                    <input
+                      {...props}
+                      type="date"
+                      value={date}
+                      min={todayISO()}
+                      max={addDaysISO(todayISO(), 60)}
+                      onChange={(e) => {
+                        setDate(e.target.value);
+                        setSelected(null);
+                        setWaitlisted(false);
+                      }}
+                      className="h-12 w-full rounded-xl border border-line-strong bg-surface-2 px-4 text-sm text-ink transition-colors focus:border-brand-500"
+                    />
+                  )}
+                </Field>
               </div>
+
+              <div className="mt-4">
+                <Field
+                  label="Observação para o barbeiro"
+                  hint="Opcional. Ex.: máquina 2 nas laterais."
+                >
+                  {(props) => (
+                    <Textarea
+                      {...props}
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      maxLength={500}
+                      rows={2}
+                      placeholder="Alguma preferência?"
+                    />
+                  )}
+                </Field>
+              </div>
+            </Card>
+          </div>
+
+          {/* ---------------------------------------------------- horários */}
+          <Card className="flex flex-col p-5 sm:p-6 lg:sticky lg:top-24 lg:self-start">
+            <StepTitle number={3} icon={Clock} label="Horário" />
+
+            <div className="min-h-56 flex-1">
+              {slotsLoading ? (
+                <div className="grid grid-cols-3 gap-2">
+                  {Array.from({ length: 9 }, (_, index) => (
+                    <Skeleton key={index} className="h-11" />
+                  ))}
+                </div>
+              ) : slotsError ? (
+                <p
+                  role="alert"
+                  className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger"
+                >
+                  {slotsError.message}
+                </p>
+              ) : slots.length === 0 ? (
+                <EmptyDay
+                  waitlisted={waitlisted}
+                  onJoinWaitlist={handleJoinWaitlist}
+                />
+              ) : (
+                <div
+                  role="radiogroup"
+                  aria-label="Horários disponíveis"
+                  className="scroll-slim grid max-h-72 grid-cols-3 gap-2 overflow-y-auto pr-1"
+                >
+                  {slots.map((slot) => {
+                    const isSelected = selected?.dateTime === slot.dateTime;
+                    return (
+                      <button
+                        key={slot.dateTime}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        onClick={() => setSelected(slot)}
+                        className={cn(
+                          'h-11 rounded-xl text-sm font-bold tabular transition-colors',
+                          isSelected
+                            ? 'bg-brand-500 text-surface-0'
+                            : 'border border-line bg-surface-2 text-ink hover:border-brand-500/60 hover:text-brand-400',
+                        )}
+                      >
+                        {slot.time}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
-          </div>
+            <div className="mt-5 border-t border-line pt-5">
+              {service && selected && (
+                <dl className="mb-4 space-y-1.5 text-sm">
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-ink-subtle">Serviço</dt>
+                    <dd className="font-semibold text-ink">{service.name}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-ink-subtle">Quando</dt>
+                    <dd className="font-semibold tabular text-ink">
+                      {formatDateLong(date)}, {selected.time}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-ink-subtle">Valor</dt>
+                    <dd className="font-bold tabular text-brand-400">
+                      {formatBRL(service.price)}
+                    </dd>
+                  </div>
+                </dl>
+              )}
+
+              <Button
+                size="lg"
+                block
+                loading={booking}
+                disabled={!selected || slotsLoading}
+                onClick={handleBook}
+              >
+                {selected ? `Confirmar às ${selected.time}` : 'Escolha um horário'}
+              </Button>
+            </div>
+          </Card>
         </div>
       </main>
+    </>
+  );
+}
 
-      <style dangerouslySetInnerHTML={{
-        __html: `
-        .custom-calendar-icon::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }
-      `}} />
+function StepTitle({
+  number,
+  icon: Icon,
+  label,
+}: {
+  number: number;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+}) {
+  return (
+    <h2 className="mb-4 flex items-center gap-2.5 text-sm font-bold uppercase tracking-wider text-ink-muted">
+      <span
+        className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-500 text-xs font-black text-surface-0"
+        aria-hidden="true"
+      >
+        {number}
+      </span>
+      <Icon className="h-4 w-4 text-brand-400" aria-hidden="true" />
+      {label}
+    </h2>
+  );
+}
+
+/**
+ * Dia lotado. Antes a tela dizia "Tudo lotado para este dia" e encerrava o
+ * assunto — a intenção de compra terminava ali.
+ */
+function EmptyDay({
+  waitlisted,
+  onJoinWaitlist,
+}: {
+  waitlisted: boolean;
+  onJoinWaitlist: () => void;
+}) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center py-8 text-center">
+      <CalendarX2
+        className="mb-3 h-8 w-8 text-ink-subtle"
+        aria-hidden="true"
+      />
+      <p className="text-sm font-semibold text-ink">
+        Nenhum horário livre neste dia
+      </p>
+      <p className="mt-1 text-xs text-ink-muted">
+        Tente outra data — ou avisamos você se alguém desmarcar.
+      </p>
+
+      {waitlisted ? (
+        <p className="mt-4 flex items-center gap-1.5 text-xs font-bold text-success">
+          <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+          Você está na lista de espera
+        </p>
+      ) : (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="mt-4"
+          onClick={onJoinWaitlist}
+        >
+          <BellRing className="h-4 w-4" aria-hidden="true" />
+          Avise-me se vagar
+        </Button>
+      )}
     </div>
   );
 }
 
-export default function NovoAgendamento() {
+/** Tela de confirmação: o desfecho que o fluxo antigo não tinha. */
+function Confirmation({
+  appointment,
+  onNewBooking,
+}: {
+  appointment: BookedAppointment;
+  onNewBooking: () => void;
+}) {
+  const handleAddToCalendar = () => {
+    const ics = buildCalendarEvent({
+      title: `${appointment.service.name} — Gerente Barber`,
+      description: `Com ${appointment.barber.name}.`,
+      start: new Date(appointment.startTime),
+      end: new Date(appointment.endTime),
+    });
+    downloadCalendarEvent(ics, 'agendamento-gerente-barber.ics');
+  };
+
+  return (
+    <main id="conteudo" className="mx-auto w-full max-w-xl px-4 py-12 sm:px-6">
+      <Card className="p-6 text-center sm:p-8">
+        <span className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-success/12 text-success">
+          <CheckCircle2 className="h-8 w-8" aria-hidden="true" />
+        </span>
+
+        <h1 className="font-display text-2xl font-extrabold tracking-tight text-ink">
+          Horário confirmado!
+        </h1>
+        <p className="mt-2 text-sm text-ink-muted">
+          Enviamos os detalhes no seu WhatsApp e um lembrete chega 2 horas
+          antes.
+        </p>
+
+        <dl className="mt-7 divide-y divide-line rounded-xl border border-line bg-surface-2 text-left text-sm">
+          <Row label="Serviço" value={appointment.service.name} />
+          <Row label="Profissional" value={appointment.barber.name} />
+          <Row
+            label="Data"
+            value={formatDateLong(appointment.startTime)}
+          />
+          <Row
+            label="Horário"
+            value={`${formatTime(appointment.startTime)} — ${formatTime(appointment.endTime)}`}
+          />
+          <Row label="Valor" value={formatBRL(appointment.priceCharged)} />
+        </dl>
+
+        <div className="mt-7 flex flex-col gap-2 sm:flex-row">
+          <Button variant="secondary" block onClick={handleAddToCalendar}>
+            <CalendarPlus className="h-4 w-4" aria-hidden="true" />
+            Adicionar à agenda
+          </Button>
+          <ButtonLink href="/reservas" block>
+            Ver minhas reservas
+          </ButtonLink>
+        </div>
+
+        <button
+          type="button"
+          onClick={onNewBooking}
+          className="mt-5 text-sm font-semibold text-ink-muted transition-colors hover:text-brand-400"
+        >
+          Marcar outro horário
+        </button>
+      </Card>
+
+      <p className="mt-6 text-center text-sm text-ink-subtle">
+        Precisa mudar?{' '}
+        <Link
+          href="/reservas"
+          className="font-semibold text-ink-muted transition-colors hover:text-brand-400"
+        >
+          Remarque ou cancele em Minhas reservas
+        </Link>
+        .
+      </p>
+    </main>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-4 px-4 py-3">
+      <dt className="text-ink-subtle">{label}</dt>
+      <dd className="text-right font-semibold text-ink">{value}</dd>
+    </div>
+  );
+}
+
+export default function Page() {
   return (
     <Suspense fallback={null}>
-      <NovoAgendamentoForm />
+      <NewBookingPage />
     </Suspense>
   );
 }

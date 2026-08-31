@@ -1,397 +1,484 @@
-"use client";
+'use client';
 
-import React, { useEffect, useState } from 'react';
-import { API_URL } from '@/lib/api';
-import { useRouter } from 'next/navigation';
+import React, { useCallback, useEffect, useState } from 'react';
+import { KeyRound, Pencil, Plus, Search, UserRound, Users } from 'lucide-react';
+import { ApiError, api } from '@/lib/api';
+import { useSession } from '@/lib/use-session';
+import { useAsyncData } from '@/lib/use-async-data';
+import { ADMIN_NAV } from '@/lib/nav';
+import { formatBRL, formatDate, formatPhone } from '@/lib/format';
+import { AppHeader, PageHeading } from '@/components/app-header';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
+import { Field, Input } from '@/components/ui/field';
+import { Modal } from '@/components/ui/modal';
+import { EmptyState } from '@/components/ui/empty-state';
+import { SkeletonList } from '@/components/ui/skeleton';
+import { useToast } from '@/components/ui/toast';
 
 interface Client {
   id: string;
   name: string;
   email: string;
   phoneNumber: string | null;
-  birthDate?: string | null;
+  birthDate: string | null;
+  isActive: boolean;
   createdAt: string;
 }
 
-export default function GerenciarClientes() {
-  const [clients, setClients] = useState<Client[]>([]);
-  const [loading, setLoading] = useState(true);
+interface History {
+  client: Client;
+  metrics: {
+    totalSpent: number;
+    completedCount: number;
+    cancelledCount: number;
+    noShowCount: number;
+    totalAppointments: number;
+    ticketAverage: number;
+  };
+  history: Array<{
+    id: string;
+    date: string;
+    service: string;
+    price: number;
+    barber: string;
+    status: string;
+    rating: number | null;
+  }>;
+}
+
+export default function ClientsPage() {
+  const { user, ready } = useSession('ADMIN');
+  const toast = useToast();
+
   const [search, setSearch] = useState('');
-  
-  // States for the form
-  const [isEditing, setIsEditing] = useState(false);
-  const [currentId, setCurrentId] = useState('');
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [birthDate, setBirthDate] = useState('');
+  // Espera o usuário parar de digitar antes de consultar o servidor.
+  const debouncedSearch = useDebounced(search, 300);
 
-  // States for History Modal
-  const [selectedClientHistory, setSelectedClientHistory] = useState<any>(null);
-  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
-  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [editing, setEditing] = useState<Client | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [viewing, setViewing] = useState<History | null>(null);
 
-  const router = useRouter();
-
-  const fetchClients = async () => {
-    const token = localStorage.getItem('access_token');
-    const isAdmin = localStorage.getItem('is_admin') === 'true';
-
-    if (!token || !isAdmin) {
-      router.push('/dashboard');
-      return;
-    }
-
-    try {
-      const res = await fetch(`${API_URL}/admin/clients`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        setClients(await res.json());
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchClients();
-  }, [router]);
-
-  const resetForm = () => {
-    setIsEditing(false);
-    setCurrentId('');
-    setName('');
-    setEmail('');
-    setPhoneNumber('');
-    setBirthDate('');
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const token = localStorage.getItem('access_token');
-    
-    const url = isEditing 
-      ? `${API_URL}/admin/clients/${currentId}` 
-      : `${API_URL}/admin/clients`;
-    
-    const method = isEditing ? 'PUT' : 'POST';
-
-    try {
-      const res = await fetch(url, {
-        method,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          name,
-          email,
-          phoneNumber: phoneNumber || undefined,
-          birthDate: birthDate || undefined
-        })
-      });
-
-      if (res.ok) {
-        fetchClients();
-        resetForm();
-      } else {
-        const error = await res.json();
-        alert(error.message || 'Erro ao salvar o cliente.');
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleEdit = (c: Client) => {
-    setIsEditing(true);
-    setCurrentId(c.id);
-    setName(c.name);
-    setEmail(c.email);
-    setPhoneNumber(c.phoneNumber || '');
-    setBirthDate(c.birthDate ? c.birthDate.split('T')[0] : '');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm('Deseja realmente excluir este cliente? Agendamentos atrelados a ele poderão ser removidos.')) return;
-    
-    const token = localStorage.getItem('access_token');
-    try {
-      const res = await fetch(`${API_URL}/admin/clients/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        fetchClients();
-      } else {
-        alert('Falha ao excluir.');
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleViewHistory = async (id: string) => {
-    const token = localStorage.getItem('access_token');
-    if (!token) return;
-
-    setLoadingHistory(true);
-    setIsHistoryModalOpen(true);
-    
-    try {
-      const res = await fetch(`${API_URL}/admin/clients/${id}/history`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        setSelectedClientHistory(await res.json());
-      } else {
-        alert('Falha ao buscar histórico.');
-        setIsHistoryModalOpen(false);
-      }
-    } catch (err) {
-      console.error(err);
-      setIsHistoryModalOpen(false);
-    } finally {
-      setLoadingHistory(false);
-    }
-  };
-
-  const filteredClients = clients.filter(c => 
-    c.name.toLowerCase().includes(search.toLowerCase()) || 
-    c.email.toLowerCase().includes(search.toLowerCase())
+  const fetchClients = useCallback(
+    () =>
+      ready
+        ? api<{ items: Client[]; total: number }>('/admin/clients', {
+            auth: true,
+            query: { search: debouncedSearch || undefined, pageSize: 100 },
+          })
+        : Promise.resolve({ items: [], total: 0 }),
+    [ready, debouncedSearch],
   );
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-950 text-amber-500">
-        <div className="animate-pulse font-bold tracking-widest uppercase">Carregando...</div>
-      </div>
-    );
-  }
+  const { data, loading, reload: load } = useAsyncData(fetchClients);
+  const items = data?.items ?? [];
+  const total = data?.total ?? 0;
+
+  const openHistory = async (client: Client) => {
+    try {
+      const result = await api<History>(`/admin/clients/${client.id}/history`, {
+        auth: true,
+      });
+      setViewing(result);
+    } catch (caught) {
+      toast.error(
+        'Não foi possível abrir a ficha',
+        caught instanceof ApiError ? caught.message : undefined,
+      );
+    }
+  };
+
+  const resetPassword = async (client: Client) => {
+    try {
+      const result = await api<{ temporaryPassword: string }>(
+        `/admin/clients/${client.id}/reset-password`,
+        { method: 'POST', auth: true },
+      );
+      toast.success(
+        'Senha temporária gerada',
+        `Passe para ${client.name}: ${result.temporaryPassword} — será trocada no primeiro acesso.`,
+      );
+    } catch (caught) {
+      toast.error(
+        'Não foi possível gerar a senha',
+        caught instanceof ApiError ? caught.message : undefined,
+      );
+    }
+  };
+
+  if (!ready || !user) return null;
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans">
-      <header className="sticky top-0 z-50 border-b border-neutral-800 bg-neutral-950/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-4xl flex-col gap-3 px-4 py-3 sm:h-16 sm:flex-row sm:items-center sm:justify-between sm:gap-0 sm:px-6 sm:py-0">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-neutral-950 font-black text-sm">
-              GB
-            </div>
-            <div>
-              <h1 className="text-sm font-bold text-white leading-none">Gestão de Clientes</h1>
-              <span className="text-xs text-neutral-500">Administrador</span>
-            </div>
-          </div>
-          <button 
-            onClick={() => router.push('/dashboard')}
-            className="text-xs font-bold uppercase tracking-wider text-neutral-400 hover:text-amber-500 transition-colors"
-          >
-            Voltar ao Dashboard
-          </button>
+    <>
+      <AppHeader
+        area="Painel"
+        subtitle="Clientes"
+        items={ADMIN_NAV}
+        loginPath="/login?area=profissional"
+      />
+
+      <main id="conteudo" className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
+        <PageHeading
+          title="Clientes"
+          description={`${total} cadastrado${total === 1 ? '' : 's'} na barbearia.`}
+          actions={
+            <Button onClick={() => setCreating(true)}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Novo cliente
+            </Button>
+          }
+        />
+
+        <div className="relative mb-5">
+          <Search
+            className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-subtle"
+            aria-hidden="true"
+          />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="Buscar cliente"
+            placeholder="Buscar por nome, e-mail ou telefone"
+            className="h-12 w-full rounded-xl border border-line-strong bg-surface-2 pl-11 pr-4 text-sm text-ink placeholder:text-ink-subtle focus:border-brand-500"
+          />
         </div>
-      </header>
 
-      <main className="mx-auto max-w-4xl px-6 py-8">
-        
-        {/* Formulário de Criação/Edição */}
-        <section className="mb-10 rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6">
-          <h2 className="text-xl font-bold text-white mb-2">
-            {isEditing ? 'Editar Cliente' : 'Novo Cliente (Walk-in)'}
-          </h2>
-          {!isEditing && (
-             <p className="text-sm text-neutral-400 mb-6">
-               A senha padrão para novos cadastros é <code className="bg-neutral-800 px-1 py-0.5 rounded text-amber-400">Mudar@123</code>.
-             </p>
-          )}
-          
-          <form onSubmit={handleSubmit} className="grid gap-4 md:grid-cols-3 items-end">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Nome</label>
-              <input 
-                type="text" required
-                value={name} onChange={e => setName(e.target.value)}
-                className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-3 text-sm text-white focus:border-amber-500 focus:outline-none"
-                placeholder="Ex: João da Silva"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">E-mail</label>
-              <input 
-                type="email" required
-                value={email} onChange={e => setEmail(e.target.value)}
-                className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-3 text-sm text-white focus:border-amber-500 focus:outline-none"
-                placeholder="joao@email.com"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Telefone (Opcional)</label>
-              <input 
-                type="text"
-                value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)}
-                className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-3 text-sm text-white focus:border-amber-500 focus:outline-none"
-                placeholder="(11) 99999-9999"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Data de Nascimento (Opcional)</label>
-              <input 
-                type="date"
-                value={birthDate} onChange={e => setBirthDate(e.target.value)}
-                className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-3 text-sm text-white focus:border-amber-500 focus:outline-none"
-              />
-            </div>
-            <div className="md:col-span-3 flex gap-3 justify-end mt-2">
-              {isEditing && (
-                <button type="button" onClick={resetForm} className="px-6 py-3 rounded-xl border border-neutral-700 text-sm font-bold text-neutral-400 hover:text-white transition-colors">
-                  Cancelar
-                </button>
-              )}
-              <button type="submit" className="px-6 py-3 rounded-xl bg-amber-500 text-sm font-bold text-neutral-950 hover:bg-amber-400 transition-colors shadow-[0_0_15px_rgba(245,158,11,0.2)]">
-                {isEditing ? 'Salvar Alterações' : 'Cadastrar Cliente'}
-              </button>
-            </div>
-          </form>
-        </section>
+        {loading ? (
+          <SkeletonList count={5} className="h-20" />
+        ) : items.length === 0 ? (
+          <EmptyState
+            icon={<Users className="h-6 w-6" aria-hidden="true" />}
+            title={search ? 'Nenhum cliente encontrado' : 'Nenhum cliente ainda'}
+            description={
+              search
+                ? 'Tente outro termo de busca.'
+                : 'Cadastre o primeiro cliente ou espere o primeiro agendamento pelo site.'
+            }
+          />
+        ) : (
+          <ul className="space-y-2">
+            {items.map((client) => (
+              <li key={client.id}>
+                <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <button
+                    type="button"
+                    onClick={() => openHistory(client)}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                  >
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface-3 text-ink-subtle">
+                      <UserRound className="h-5 w-5" aria-hidden="true" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-2">
+                        <span className="truncate font-semibold text-ink">
+                          {client.name}
+                        </span>
+                        {!client.isActive && (
+                          <Badge tone="neutral">Inativo</Badge>
+                        )}
+                      </span>
+                      <span className="block truncate text-xs text-ink-subtle">
+                        {client.phoneNumber
+                          ? formatPhone(client.phoneNumber)
+                          : 'Sem telefone'}{' '}
+                        · desde {formatDate(client.createdAt)}
+                      </span>
+                    </span>
+                  </button>
 
-        {/* Lista de Clientes */}
-        <section>
-          <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4">
-            <h2 className="text-xl font-bold text-white">Clientes Cadastrados</h2>
-            <input 
-              type="text"
-              placeholder="Buscar por nome ou e-mail..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full md:w-64 rounded-xl border border-neutral-800 bg-neutral-900/50 px-4 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-            />
-          </div>
-          <div className="space-y-3">
-            {filteredClients.map(c => (
-              <div key={c.id} className="flex flex-col md:flex-row md:items-center justify-between rounded-xl border border-neutral-800 bg-neutral-900/30 p-5 transition-colors hover:border-neutral-700">
-                <div>
-                  <h3 className="text-lg font-bold text-white">{c.name}</h3>
-                  <div className="flex items-center gap-4 mt-1">
-                    <span className="text-sm text-neutral-400">{c.email}</span>
-                    {c.phoneNumber && (
-                      <>
-                        <span className="text-xs text-neutral-500">•</span>
-                        <span className="text-sm text-neutral-400">{c.phoneNumber}</span>
-                      </>
-                    )}
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => resetPassword(client)}
+                      aria-label={`Gerar senha temporária para ${client.name}`}
+                    >
+                      <KeyRound className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setEditing(client)}
+                    >
+                      <Pencil className="h-4 w-4" aria-hidden="true" />
+                      Editar
+                    </Button>
                   </div>
-                </div>
-                <div className="flex gap-2 mt-4 md:mt-0">
-                  <button 
-                    onClick={() => handleViewHistory(c.id)}
-                    className="px-4 py-2 rounded-lg bg-green-500 text-xs font-bold text-neutral-950 hover:bg-green-400 transition-colors shadow-[0_0_10px_rgba(34,197,94,0.2)]"
-                  >
-                    Ver Perfil
-                  </button>
-                  <button 
-                    onClick={() => handleEdit(c)}
-                    className="px-4 py-2 rounded-lg bg-neutral-800 text-xs font-bold text-white hover:bg-neutral-700 transition-colors"
-                  >
-                    Editar
-                  </button>
-                  <button 
-                    onClick={() => handleDelete(c.id)}
-                    className="px-4 py-2 rounded-lg border border-red-500/20 bg-red-500/10 text-xs font-bold text-red-500 hover:bg-red-500 hover:text-white transition-colors"
-                  >
-                    Excluir
-                  </button>
-                </div>
-              </div>
+                </Card>
+              </li>
             ))}
-            {filteredClients.length === 0 && (
-              <div className="text-center py-10 text-neutral-500 text-sm border border-dashed border-neutral-800 rounded-xl">
-                Nenhum cliente encontrado.
-              </div>
-            )}
-          </div>
-        </section>
-
+          </ul>
+        )}
       </main>
 
-      {/* Modal de Histórico */}
-      {isHistoryModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-2xl rounded-3xl border border-neutral-800 bg-neutral-950 p-6 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-white">Perfil do Cliente</h2>
-              <button onClick={() => setIsHistoryModalOpen(false)} className="text-neutral-500 hover:text-white text-2xl leading-none">&times;</button>
-            </div>
-            
-            {loadingHistory || !selectedClientHistory ? (
-              <div className="flex-1 flex items-center justify-center min-h-[300px]">
-                <div className="animate-pulse text-amber-500 font-bold uppercase tracking-widest">Carregando Histórico...</div>
-              </div>
-            ) : (
-              <div className="flex-1 overflow-y-auto pr-2 space-y-6">
-                
-                {/* Header Profile */}
-                <div className="flex items-center gap-4 bg-neutral-900/50 p-4 rounded-2xl border border-neutral-800">
-                  <div className="h-14 w-14 rounded-full bg-amber-500 text-neutral-950 flex items-center justify-center text-xl font-black">
-                    {selectedClientHistory.client.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-white">{selectedClientHistory.client.name}</h3>
-                    <p className="text-sm text-neutral-400">{selectedClientHistory.client.email} • {selectedClientHistory.client.phoneNumber || 'Sem telefone'}</p>
-                  </div>
-                </div>
+      {(creating || editing) && (
+        <ClientDialog
+          client={editing}
+          onClose={() => {
+            setCreating(false);
+            setEditing(null);
+          }}
+          onDone={() => {
+            setCreating(false);
+            setEditing(null);
+            void load();
+          }}
+        />
+      )}
 
-                {/* Métricas */}
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="bg-neutral-900/50 p-4 rounded-2xl border border-neutral-800 text-center">
-                    <p className="text-xs font-bold text-neutral-500 uppercase tracking-wide">Valor Gasto</p>
-                    <p className="text-2xl font-black text-green-500 mt-1">R$ {selectedClientHistory.metrics.totalSpent.toFixed(2).replace('.', ',')}</p>
-                  </div>
-                  <div className="bg-neutral-900/50 p-4 rounded-2xl border border-neutral-800 text-center">
-                    <p className="text-xs font-bold text-neutral-500 uppercase tracking-wide">Concluídos</p>
-                    <p className="text-2xl font-black text-white mt-1">{selectedClientHistory.metrics.completedCount}</p>
-                  </div>
-                  <div className="bg-neutral-900/50 p-4 rounded-2xl border border-neutral-800 text-center">
-                    <p className="text-xs font-bold text-neutral-500 uppercase tracking-wide">No Shows/Canc.</p>
-                    <p className="text-2xl font-black text-red-500 mt-1">{selectedClientHistory.metrics.noShowCount}</p>
-                  </div>
-                </div>
+      {viewing && (
+        <HistoryDialog history={viewing} onClose={() => setViewing(null)} />
+      )}
+    </>
+  );
+}
 
-                {/* Histórico Lista */}
-                <div>
-                  <h4 className="text-sm font-bold text-neutral-400 uppercase tracking-wider mb-3">Histórico de Cortes ({selectedClientHistory.metrics.totalAppointments})</h4>
-                  <div className="space-y-3">
-                    {selectedClientHistory.history.map((h: any) => (
-                      <div key={h.id} className="flex justify-between items-center p-4 bg-neutral-900/30 rounded-xl border border-neutral-800">
-                        <div>
-                          <p className="font-bold text-white">{h.service}</p>
-                          <p className="text-xs text-neutral-400 mt-1">{new Date(h.date).toLocaleString('pt-BR')} • {h.barber}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-bold text-green-500">R$ {h.price.toFixed(2).replace('.', ',')}</p>
-                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded mt-1 inline-block ${
-                            h.status === 'COMPLETED' ? 'bg-green-500/20 text-green-500' :
-                            h.status === 'SCHEDULED' ? 'bg-amber-500/20 text-amber-500' :
-                            'bg-red-500/20 text-red-500'
-                          }`}>
-                            {h.status}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                    {selectedClientHistory.history.length === 0 && (
-                      <p className="text-center text-neutral-500 py-4 text-sm">Nenhum atendimento registrado.</p>
-                    )}
-                  </div>
-                </div>
+function ClientDialog({
+  client,
+  onClose,
+  onDone,
+}: {
+  client: Client | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState(client?.name ?? '');
+  const [email, setEmail] = useState(
+    client?.email.endsWith('@local.invalid') ? '' : (client?.email ?? ''),
+  );
+  const [phone, setPhone] = useState(client?.phoneNumber ?? '');
+  const [birthDate, setBirthDate] = useState(
+    client?.birthDate ? client.birthDate.slice(0, 10) : '',
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
-              </div>
-            )}
-          </div>
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+
+    try {
+      const body = {
+        name,
+        email: email || undefined,
+        phoneNumber: phone || undefined,
+        birthDate: birthDate || undefined,
+      };
+
+      if (client) {
+        await api(`/admin/clients/${client.id}`, {
+          method: 'PUT',
+          auth: true,
+          body,
+        });
+        toast.success('Cliente atualizado');
+      } else {
+        const created = await api<{ temporaryPassword: string }>(
+          '/admin/clients',
+          { method: 'POST', auth: true, body },
+        );
+        toast.success(
+          'Cliente cadastrado',
+          `Senha temporária: ${created.temporaryPassword}`,
+        );
+      }
+      onDone();
+    } catch (caught) {
+      setError(
+        caught instanceof ApiError ? caught.message : 'Não foi possível salvar.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={client ? 'Editar cliente' : 'Novo cliente'}
+      description={
+        client
+          ? undefined
+          : 'A senha é sorteada e trocada no primeiro acesso do cliente.'
+      }
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>
+            Cancelar
+          </Button>
+          <Button type="submit" form="client-form" loading={saving}>
+            Salvar
+          </Button>
+        </>
+      }
+    >
+      <form id="client-form" onSubmit={submit} className="space-y-4">
+        <Field label="Nome">
+          {(props) => (
+            <Input
+              {...props}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          )}
+        </Field>
+
+        <Field
+          label="E-mail"
+          hint="Opcional — quem chega pelo balcão nem sempre tem um."
+        >
+          {(props) => (
+            <Input
+              {...props}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="cliente@email.com"
+            />
+          )}
+        </Field>
+
+        <Field label="Celular">
+          {(props) => (
+            <Input
+              {...props}
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="(11) 99999-9999"
+            />
+          )}
+        </Field>
+
+        <Field
+          label="Data de nascimento"
+          hint="Entra na campanha de aniversário."
+          error={error}
+        >
+          {(props) => (
+            <Input
+              {...props}
+              type="date"
+              value={birthDate}
+              onChange={(e) => setBirthDate(e.target.value)}
+              max={new Date().toISOString().slice(0, 10)}
+            />
+          )}
+        </Field>
+      </form>
+    </Modal>
+  );
+}
+
+function HistoryDialog({
+  history,
+  onClose,
+}: {
+  history: History;
+  onClose: () => void;
+}) {
+  const { client, metrics } = history;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      size="lg"
+      title={client.name}
+      description={`${client.phoneNumber ? formatPhone(client.phoneNumber) : 'Sem telefone'} · cliente desde ${formatDate(client.createdAt)}`}
+    >
+      <dl className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat label="Já gastou" value={formatBRL(metrics.totalSpent)} />
+        <Stat label="Ticket médio" value={formatBRL(metrics.ticketAverage)} />
+        <Stat label="Atendimentos" value={String(metrics.completedCount)} />
+        <Stat
+          label="Faltas"
+          value={String(metrics.noShowCount)}
+          tone={metrics.noShowCount > 0 ? 'danger' : undefined}
+        />
+      </dl>
+
+      {history.history.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-line-strong px-4 py-8 text-center text-sm text-ink-muted">
+          Este cliente ainda não tem atendimentos registrados.
+        </p>
+      ) : (
+        <div className="max-h-80 overflow-y-auto">
+          <ul className="divide-y divide-line">
+            {history.history.map((entry) => (
+              <li
+                key={entry.id}
+                className="flex items-center justify-between gap-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-ink">
+                    {entry.service}
+                  </p>
+                  <p className="text-xs text-ink-subtle">
+                    {formatDate(entry.date)} · {entry.barber}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-sm font-bold tabular text-ink">
+                    {formatBRL(entry.price)}
+                  </p>
+                  <p className="text-xs text-ink-subtle">
+                    {STATUS_LABEL[entry.status] ?? entry.status}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
+    </Modal>
+  );
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  SCHEDULED: 'Confirmado',
+  COMPLETED: 'Concluído',
+  CANCELLED: 'Cancelado',
+  NO_SHOW: 'Faltou',
+};
+
+function Stat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'danger';
+}) {
+  return (
+    <div className="rounded-xl border border-line bg-surface-2 p-3">
+      <dt className="text-xs font-semibold uppercase tracking-wider text-ink-subtle">
+        {label}
+      </dt>
+      <dd
+        className={`mt-1 font-display text-lg font-extrabold tabular ${tone === 'danger' ? 'text-danger' : 'text-ink'}`}
+      >
+        {value}
+      </dd>
     </div>
   );
+}
+
+/** Atrasa o valor até o usuário parar de digitar. */
+function useDebounced<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [value, delay]);
+
+  return debounced;
 }

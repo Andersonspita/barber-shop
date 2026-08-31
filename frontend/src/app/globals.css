@@ -1,26 +1,121 @@
 @import "tailwindcss";
 
+/*
+ * Identidade da Gerente Barber.
+ *
+ * Antes estas cores viviam como classes literais (`amber-500`, `neutral-950`)
+ * repetidas centenas de vezes pelas telas, e este arquivo ainda era o
+ * boilerplate do create-next-app — inclusive com um `font-family: Arial` que
+ * anulava as duas fontes carregadas no layout.
+ *
+ * O produto assume o tema escuro de propósito: é uma barbearia, e a agenda é
+ * consultada no salão, com pouca luz. Por isso não há troca de tema — todas as
+ * cores são pintadas explicitamente, sem herdar nada do navegador.
+ */
+@theme {
+  /* Marca: o âmbar do letreiro. */
+  --color-brand-50: #fffbeb;
+  --color-brand-100: #fef3c7;
+  --color-brand-200: #fde68a;
+  --color-brand-300: #fcd34d;
+  --color-brand-400: #fbbf24;
+  --color-brand-500: #f59e0b;
+  --color-brand-600: #d97706;
+  --color-brand-700: #b45309;
+
+  /* Superfícies, do fundo da página ao card mais claro. */
+  --color-surface-0: #0a0a0b;
+  --color-surface-1: #131315;
+  --color-surface-2: #1c1c1f;
+  --color-surface-3: #26262a;
+
+  /*
+   * Texto. `muted` e `subtle` foram clareados em relação ao desenho anterior:
+   * o antigo `neutral-500` ficava em ~4,2:1 sobre o fundo e o link do rodapé,
+   * em `neutral-700`, não chegava a 2,5:1 — bem abaixo dos 4,5:1 da AA.
+   */
+  --color-ink: #f5f5f6;
+  --color-ink-muted: #b4b4bb;
+  --color-ink-subtle: #8b8b94;
+
+  --color-line: #2e2e33;
+  --color-line-strong: #3d3d44;
+
+  /* Semânticas, separadas da cor de marca. */
+  --color-success: #34d399;
+  --color-success-dim: #10b981;
+  --color-danger: #f87171;
+  --color-danger-dim: #ef4444;
+  --color-info: #7dd3fc;
+
+  --font-display: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-public-sans), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-card: 1rem;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Faz o navegador desenhar seletor de data, scrollbar e autofill em escuro,
+     no lugar do `style={{ colorScheme: 'dark' }}` repetido input a input. */
+  color-scheme: dark;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-surface-0);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background-color: color-mix(in oklab, var(--color-brand-500) 35%, transparent);
+  color: var(--color-ink);
+}
+
+/* Foco visível e consistente. Várias telas usavam `focus:outline-none` sem
+   colocar nada no lugar, deixando quem navega por teclado sem referência. */
+:focus-visible {
+  outline: 2px solid var(--color-brand-400);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Barra de rolagem discreta nos carrosséis e listas internas. */
+.scroll-slim {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+.scroll-slim::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scroll-slim::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-slim::-webkit-scrollbar-thumb {
+  background-color: var(--color-line-strong);
+  border-radius: 999px;
+}
+
+/* Colunas de dinheiro e horário alinham os dígitos. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

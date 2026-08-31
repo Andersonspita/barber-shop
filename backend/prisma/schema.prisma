@@ -20,51 +20,99 @@ enum AppointmentStatus {
 }
 
 model User {
-  id                 String        @id @default(uuid())
-  name               String
-  email              String        @unique
-  passwordHash       String
-  phoneNumber        String?
-  birthDate          DateTime?
-  role               Role          @default(CLIENT)
-  isAdmin            Boolean       @default(false)
-  commissionRate     Decimal?      @db.Decimal(5, 2)
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  id                  String        @id @default(uuid())
+  name                String
+  email               String        @unique
+  passwordHash        String
+  phoneNumber         String?
+  birthDate           DateTime?
+  role                Role          @default(CLIENT)
+  isAdmin             Boolean       @default(false)
+  isActive            Boolean       @default(true)
+  photoUrl            String?
+  bio                 String?
+  mustChangePassword  Boolean       @default(false)
+  commissionRate      Decimal?      @db.Decimal(5, 2)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
-  clientAppointments Appointment[]   @relation("ClientAppointments")
-  barberAppointments Appointment[]   @relation("BarberAppointments")
-  barberBlocks       ScheduleBlock[] @relation("BarberBlocks")
+  clientAppointments  Appointment[]        @relation("ClientAppointments")
+  barberAppointments  Appointment[]        @relation("BarberAppointments")
+  createdAppointments Appointment[]        @relation("AppointmentCreatedBy")
+  barberBlocks        ScheduleBlock[]      @relation("BarberBlocks")
+  workingHours        WorkingHours[]       @relation("BarberWorkingHours")
+  barberServices      BarberService[]      @relation("BarberServices")
+  resetTokens         PasswordResetToken[] @relation("UserResetTokens")
+  waitlistEntries     WaitlistEntry[]      @relation("ClientWaitlist")
+  waitlistedFor       WaitlistEntry[]      @relation("BarberWaitlist")
+
+  @@index([role, isActive])
+  @@index([birthDate])
 }
 
 model Service {
-  id              String        @id @default(uuid())
+  id              String          @id @default(uuid())
   name            String
+  description     String?
   durationMinutes Int
-  price           Decimal       @db.Decimal(10, 2)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  price           Decimal         @db.Decimal(10, 2)
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
   appointments    Appointment[]
+  barberServices  BarberService[] @relation("ServiceBarbers")
+  waitlistEntries WaitlistEntry[] @relation("ServiceWaitlist")
+
+  @@index([isActive])
+}
+
+/// Vínculo N-N entre barbeiro e serviço. Um barbeiro sem nenhuma linha aqui
+/// é tratado como apto a todos os serviços (compatibilidade com bases antigas).
+model BarberService {
+  id                      String   @id @default(uuid())
+  barberId                String
+  serviceId               String
+  /// Sobrescreve o preço do serviço para este barbeiro, quando preenchido.
+  priceOverride           Decimal? @db.Decimal(10, 2)
+  /// Sobrescreve a duração do serviço para este barbeiro, quando preenchida.
+  durationMinutesOverride Int?
+  createdAt               DateTime @default(now())
+
+  barber                  User     @relation("BarberServices", fields: [barberId], references: [id], onDelete: Cascade)
+  service                 Service  @relation("ServiceBarbers", fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([barberId, serviceId])
+  @@index([serviceId])
 }
 
 model Appointment {
-  id        String            @id @default(uuid())
-  clientId  String
-  barberId  String
-  serviceId String
-  startTime DateTime
-  endTime   DateTime
-  status    AppointmentStatus @default(SCHEDULED)
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+  id          String            @id @default(uuid())
+  clientId    String
+  barberId    String
+  serviceId   String
+  startTime   DateTime
+  endTime     DateTime
+  status      AppointmentStatus @default(SCHEDULED)
+  /// Valor cobrado no momento da reserva. Sem ele, mudar o preço de um serviço
+  /// reescreveria o faturamento de todos os meses anteriores.
+  priceCharged Decimal          @db.Decimal(10, 2)
+  notes       String?
+  /// Quem registrou o agendamento: o próprio cliente, ou o barbeiro no encaixe de balcão.
+  createdById String?
+  cancelledAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 
-  client    User    @relation("ClientAppointments", fields: [clientId], references: [id])
-  barber    User    @relation("BarberAppointments", fields: [barberId], references: [id])
-  service   Service @relation(fields: [serviceId], references: [id])
+  client      User    @relation("ClientAppointments", fields: [clientId], references: [id])
+  barber      User    @relation("BarberAppointments", fields: [barberId], references: [id])
+  createdBy   User?   @relation("AppointmentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  service     Service @relation(fields: [serviceId], references: [id])
+  review      Review? @relation("AppointmentReview")
 
-  // Opcional: Índice para otimizar as buscas por horário e barbeiro
   @@index([barberId, startTime, endTime])
+  @@index([clientId, startTime])
+  @@index([status, startTime])
 }
 
 model ScheduleBlock {
@@ -75,5 +123,100 @@ model ScheduleBlock {
   reason    String?
   createdAt DateTime @default(now())
 
-  barber    User     @relation("BarberBlocks", fields: [barberId], references: [id])
+  barber    User     @relation("BarberBlocks", fields: [barberId], references: [id], onDelete: Cascade)
+
+  @@index([barberId, startTime, endTime])
+}
+
+/// Jornada de trabalho recorrente de um barbeiro, por dia da semana.
+/// Os minutos são contados a partir da meia-noite no fuso da barbearia.
+/// Vários intervalos no mesmo dia representam, por exemplo, a pausa do almoço.
+model WorkingHours {
+  id          String   @id @default(uuid())
+  barberId    String
+  /// 0 = domingo … 6 = sábado
+  weekday     Int
+  startMinute Int
+  endMinute   Int
+  createdAt   DateTime @default(now())
+
+  barber      User     @relation("BarberWorkingHours", fields: [barberId], references: [id], onDelete: Cascade)
+
+  @@unique([barberId, weekday, startMinute])
+  @@index([barberId, weekday])
+}
+
+/// Feriados e fechamentos da barbearia inteira.
+model Holiday {
+  id          String   @id @default(uuid())
+  /// Data no fuso da barbearia, normalizada para meia-noite UTC.
+  date        DateTime @unique @db.Date
+  description String
+  createdAt   DateTime @default(now())
+}
+
+/// Configuração única da barbearia (sempre a linha com id = "default").
+model ShopSettings {
+  id                        String   @id @default("default")
+  name                      String   @default("Gerente Barber")
+  timezone                  String   @default("America/Sao_Paulo")
+  slotIntervalMinutes       Int      @default(30)
+  /// Antecedência mínima entre agora e o início do horário reservável.
+  minAdvanceMinutes         Int      @default(30)
+  /// Até quantos dias no futuro o cliente pode marcar.
+  maxAdvanceDays            Int      @default(60)
+  /// Prazo mínimo, antes do horário, para o cliente cancelar sozinho.
+  cancellationWindowMinutes Int      @default(120)
+  addressLine               String?
+  city                      String?
+  mapsUrl                   String?
+  phone                     String?
+  whatsapp                  String?
+  instagram                 String?
+  about                     String?
+  updatedAt                 DateTime @updatedAt
+
+  @@map("shop_settings")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user      User      @relation("UserResetTokens", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Review {
+  id            String      @id @default(uuid())
+  appointmentId String      @unique
+  rating        Int
+  comment       String?
+  createdAt     DateTime    @default(now())
+
+  appointment   Appointment @relation("AppointmentReview", fields: [appointmentId], references: [id], onDelete: Cascade)
+}
+
+/// "Avise-me se vagar": interesse registrado por um cliente num dia lotado.
+model WaitlistEntry {
+  id         String    @id @default(uuid())
+  clientId   String
+  serviceId  String
+  barberId   String?
+  /// Dia desejado, normalizado para meia-noite UTC.
+  date       DateTime  @db.Date
+  notifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  client     User      @relation("ClientWaitlist", fields: [clientId], references: [id], onDelete: Cascade)
+  service    Service   @relation("ServiceWaitlist", fields: [serviceId], references: [id], onDelete: Cascade)
+  barber     User?     @relation("BarberWaitlist", fields: [barberId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, serviceId, date])
+  @@index([date, notifiedAt])
 }
