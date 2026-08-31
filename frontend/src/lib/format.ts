@@ -61,8 +61,14 @@ const TIME = new Intl.DateTimeFormat('pt-BR', {
 
 const WEEKDAY_SHORT = new Intl.DateTimeFormat('pt-BR', { weekday: 'short' });
 
+/**
+ * "segunda-feira, 31 de agosto" com a inicial maiúscula. A classe `capitalize`
+ * do CSS não serve aqui: ela sobe a primeira letra de cada palavra e produz
+ * "Segunda-Feira, 31 De Agosto".
+ */
 export function formatDateLong(value: string | Date): string {
-  return DATE_LONG.format(asDate(value));
+  const formatted = DATE_LONG.format(asDate(value));
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
 }
 
 export function formatDate(value: string | Date): string {

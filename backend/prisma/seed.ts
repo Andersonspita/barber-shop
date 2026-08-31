@@ -31,21 +31,26 @@ async function main() {
   await prisma.service.deleteMany();
   await prisma.user.deleteMany();
 
+  // A migração já cria a linha de configuração com os padrões, então o
+  // `update` precisa repetir os campos — com `update: {}` o seed não teria
+  // efeito nenhum sobre uma base já migrada.
+  const shopDefaults = {
+    name: 'Gerente Barber',
+    timezone: 'America/Sao_Paulo',
+    addressLine: 'Rua das Tesouras, 120 — Centro',
+    city: 'São Paulo, SP',
+    mapsUrl: 'https://maps.google.com/?q=Rua+das+Tesouras+120',
+    phone: '(11) 3000-0000',
+    whatsapp: '11900000000',
+    instagram: 'gerentebarber',
+    about:
+      'Barbearia de bairro desde 2014. Corte, barba e cuidado sem pressa, com hora marcada.',
+  };
+
   await prisma.shopSettings.upsert({
     where: { id: 'default' },
-    update: {},
-    create: {
-      id: 'default',
-      name: 'Gerente Barber',
-      timezone: 'America/Sao_Paulo',
-      addressLine: 'Rua das Tesouras, 120 — Centro',
-      city: 'São Paulo, SP',
-      phone: '(11) 3000-0000',
-      whatsapp: '11900000000',
-      instagram: 'gerentebarber',
-      about:
-        'Barbearia de bairro desde 2014. Corte, barba e cuidado sem pressa, com hora marcada.',
-    },
+    update: shopDefaults,
+    create: { id: 'default', ...shopDefaults },
   });
 
   const services = await Promise.all(

@@ -242,7 +242,7 @@ export default function DashboardPage() {
             </Button>
           )}
 
-          <p className="ml-auto text-sm font-semibold capitalize text-ink-muted">
+          <p className="ml-auto text-sm font-semibold text-ink-muted first-letter:uppercase">
             {formatDateLong(date)}
           </p>
         </div>
