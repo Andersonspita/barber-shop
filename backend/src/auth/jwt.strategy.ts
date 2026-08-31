@@ -3,6 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { requireJwtSecret } from './jwt-secret.util';
+import { SessionUser } from '../appointments/appointments.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -14,15 +15,28 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string; email: string; role: string }) {
+  /**
+   * O papel vem do banco, não do token: promover ou desativar alguém passa a
+   * valer na requisição seguinte, sem esperar o JWT expirar.
+   */
+  async validate(payload: { sub: string }): Promise<SessionUser> {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        isAdmin: true,
+        isActive: true,
+      },
     });
 
-    if (!user) {
+    if (!user || !user.isActive) {
       throw new UnauthorizedException();
     }
 
-    return user;
+    const { isActive: _isActive, ...session } = user;
+    return session;
   }
 }

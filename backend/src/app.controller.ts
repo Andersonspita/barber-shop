@@ -1,32 +1,24 @@
 import { Controller, Get } from '@nestjs/common';
 import { AppService } from './app.service';
-import { PrismaService } from './prisma/prisma.service';
 
+/**
+ * As rotas `/services` e `/barbers` viviam aqui e também no
+ * PublicCatalogController — duas definições para o mesmo caminho, e a que
+ * respondia dependia da ordem de registro dos módulos. A versão daqui não
+ * filtrava serviço inativo nem trazia a descrição. O catálogo público é o
+ * dono dessas rotas; aqui fica só a verificação de saúde.
+ */
 @Controller()
 export class AppController {
-  constructor(
-    private readonly appService: AppService,
-    private readonly prisma: PrismaService
-  ) {}
+  constructor(private readonly appService: AppService) {}
 
   @Get()
   getHello(): string {
     return this.appService.getHello();
   }
 
-  @Get('services')
-  async getServices() {
-    return this.prisma.service.findMany({
-      orderBy: { name: 'asc' }
-    });
-  }
-
-  @Get('barbers')
-  async getBarbers() {
-    return this.prisma.user.findMany({
-      where: { role: 'BARBER' },
-      select: { id: true, name: true },
-      orderBy: { name: 'asc' }
-    });
+  @Get('health')
+  health() {
+    return { status: 'ok', uptime: process.uptime() };
   }
 }

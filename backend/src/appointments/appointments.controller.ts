@@ -1,88 +1,159 @@
-import { Controller, Post, Body, Get, UseGuards, Request, Query, BadRequestException, Patch, Param } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
-import { AppointmentsService } from './appointments.service';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  Request,
+} from '@nestjs/common';
+import { AppointmentsService, SessionUser } from './appointments.service';
+import { AvailabilityService } from '../availability/availability.service';
+import { AdminOnly, Auth, Roles } from '../common/roles.guard';
+import {
+  AgendaQueryDto,
+  AvailabilityQueryDto,
+  BookAppointmentDto,
+  CreateReviewDto,
+  ListAppointmentsQueryDto,
+  MetricsQueryDto,
+  RescheduleAppointmentDto,
+  UpdateStatusDto,
+  WalkInAppointmentDto,
+} from './dto';
 
 @Controller('appointments')
 export class AppointmentsController {
-  constructor(private readonly appointmentsService: AppointmentsService) {}
+  constructor(
+    private readonly appointments: AppointmentsService,
+    private readonly availability: AvailabilityService,
+  ) {}
 
+  /** Pública: a landing page mostra os horários antes de pedir login. */
   @Get('availability')
-  async getAvailability(
-    @Query('date') date: string, 
-    @Query('serviceId') serviceId: string,
-    @Query('barberId') barberId?: string
-  ) {
-    if (!date || !serviceId) {
-      throw new BadRequestException('Parâmetros date e serviceId são obrigatórios.');
-    }
-    return this.appointmentsService.getAvailability(date, serviceId, barberId);
-  }
-
-  @UseGuards(AuthGuard('jwt'))
-  @Post('dynamic')
-  async bookDynamic(@Body() body: { serviceId: string; startTime: string; barberId?: string }, @Request() req: any) {
-    const startTimeDate = new Date(body.startTime);
-    if (isNaN(startTimeDate.getTime())) {
-      throw new BadRequestException('Data inválida');
-    }
-    const appt = await this.appointmentsService.bookAnyAvailableBarber(
-      req.user.id,
-      body.serviceId,
-      startTimeDate,
-      body.barberId
+  async getAvailability(@Query() query: AvailabilityQueryDto) {
+    return this.availability.getAvailability(
+      query.date,
+      query.serviceId,
+      query.barberId,
     );
-    return { message: 'Agendamento confirmado!', appointmentId: appt.id };
   }
 
-  @UseGuards(AuthGuard('jwt'))
-  @Get('metrics/today')
-  async getTodayMetrics(@Request() req: any) {
-    if (req.user.role !== 'BARBER') throw new BadRequestException('Apenas barbeiros podem ver métricas.');
-    return this.appointmentsService.getTodayMetrics(req.user.id);
-  }
-
-  @UseGuards(AuthGuard('jwt'))
-  @Get('metrics/advanced')
-  async getAdvancedMetrics(
-    @Request() req: any,
-    @Query('startDate') startDate: string,
-    @Query('endDate') endDate: string,
-    @Query('barberId') barberId?: string
-  ) {
-    if (req.user.role !== 'BARBER') throw new BadRequestException('Acesso negado.');
-    
-    // Se não for admin, força a buscar os dados de si mesmo
-    const targetBarberId = req.user.isAdmin ? (barberId || undefined) : req.user.id;
-    
-    return this.appointmentsService.getAdvancedMetrics(startDate, endDate, targetBarberId);
-  }
-
-  @UseGuards(AuthGuard('jwt'))
-  @Get('me')
-  async getMyAppointments(@Request() req: any) {
-    const prisma = (this.appointmentsService as any).prisma;
-    // Retorna todos os agendamentos do barbeiro logado (ou do cliente, dependendo do role)
-    const appointments = await prisma.appointment.findMany({
-      where: req.user.role === 'BARBER' ? { barberId: req.user.id } : { clientId: req.user.id },
-      include: {
-        service: true,
-        client: { select: { name: true, email: true } },
-      },
-      orderBy: { startTime: 'asc' }
+  @Auth()
+  @Post()
+  async book(@Body() body: BookAppointmentDto, @Request() req: AuthedRequest) {
+    const appointment = await this.appointments.book({
+      clientId: req.user.id,
+      serviceId: body.serviceId,
+      startTime: new Date(body.startTime),
+      preferredBarberId: body.barberId,
+      notes: body.notes,
     });
-    return appointments;
+
+    return { message: 'Agendamento confirmado!', appointment };
   }
 
-  @UseGuards(AuthGuard('jwt'))
+  /** Encaixe registrado pelo barbeiro no balcão. */
+  @Roles('BARBER')
+  @Post('walk-in')
+  async walkIn(
+    @Body() body: WalkInAppointmentDto,
+    @Request() req: AuthedRequest,
+  ) {
+    const appointment = await this.appointments.createWalkIn(req.user, {
+      serviceId: body.serviceId,
+      startTime: new Date(body.startTime),
+      barberId: body.barberId,
+      clientId: body.clientId,
+      clientName: body.clientName,
+      clientPhone: body.clientPhone,
+      notes: body.notes,
+      force: body.force,
+    });
+
+    return { message: 'Atendimento registrado!', appointment };
+  }
+
+  @Auth()
+  @Get('me')
+  async listMine(
+    @Query() query: ListAppointmentsQueryDto,
+    @Request() req: AuthedRequest,
+  ) {
+    return this.appointments.listForUser(req.user, query);
+  }
+
+  @AdminOnly()
+  @Get('agenda')
+  async agenda(@Query() query: AgendaQueryDto) {
+    return this.appointments.shopAgenda(query.date, query.barberId);
+  }
+
+  @Roles('BARBER')
+  @Get('metrics/today')
+  async todayMetrics(@Request() req: AuthedRequest) {
+    return this.appointments.getTodayMetrics(req.user.id);
+  }
+
+  @Roles('BARBER')
+  @Get('metrics/advanced')
+  async advancedMetrics(
+    @Query() query: MetricsQueryDto,
+    @Request() req: AuthedRequest,
+  ) {
+    // Quem não é admin só enxerga os próprios números.
+    const barberId = req.user.isAdmin ? query.barberId : req.user.id;
+    return this.appointments.getAdvancedMetrics(
+      query.startDate,
+      query.endDate,
+      barberId,
+    );
+  }
+
+  @Auth()
+  @Patch(':id/reschedule')
+  async reschedule(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: RescheduleAppointmentDto,
+    @Request() req: AuthedRequest,
+  ) {
+    const appointment = await this.appointments.reschedule(
+      id,
+      new Date(body.startTime),
+      req.user,
+      body.barberId,
+    );
+    return { message: 'Agendamento remarcado!', appointment };
+  }
+
+  @Auth()
   @Patch(':id/status')
   async updateStatus(
-    @Param('id') id: string,
-    @Body('status') status: string,
-    @Request() req: any
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: UpdateStatusDto,
+    @Request() req: AuthedRequest,
   ) {
-    if (req.user.role === 'CLIENT' && status !== 'CANCELLED') {
-      throw new BadRequestException('Clientes só podem cancelar agendamentos.');
-    }
-    return this.appointmentsService.updateStatus(id, status, req.user.id, req.user.role);
+    return this.appointments.updateStatus(id, body.status, req.user);
   }
+
+  @Auth()
+  @Post(':id/review')
+  async review(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: CreateReviewDto,
+    @Request() req: AuthedRequest,
+  ) {
+    return this.appointments.createReview(
+      id,
+      req.user,
+      body.rating,
+      body.comment,
+    );
+  }
+}
+
+interface AuthedRequest {
+  user: SessionUser;
 }

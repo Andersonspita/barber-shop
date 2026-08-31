@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { AdminBarbersController } from './admin-barbers.controller';
 import { PrismaModule } from '../prisma/prisma.module';
+import { AdminBarbersController } from './admin-barbers.controller';
 
 @Module({
   imports: [PrismaModule],

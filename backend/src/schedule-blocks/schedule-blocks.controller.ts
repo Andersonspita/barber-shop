@@ -1,57 +1,88 @@
-import { Controller, Post, Get, Delete, Body, Param, Query, UseGuards, Request, BadRequestException } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  ForbiddenException,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  Request,
+} from '@nestjs/common';
+import { IsISO8601, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { ScheduleBlocksService } from './schedule-blocks.service';
+import { Roles } from '../common/roles.guard';
+import { SessionUser } from '../appointments/appointments.service';
 
+class CreateBlockDto {
+  @IsOptional() @IsUUID() barberId?: string;
+  @IsISO8601() startTime!: string;
+  @IsISO8601() endTime!: string;
+  @IsOptional() @IsString() @MaxLength(200) reason?: string;
+}
+
+class ListBlocksQueryDto {
+  @IsOptional() @IsUUID() barberId?: string;
+  @IsOptional() @IsISO8601() start?: string;
+  @IsOptional() @IsISO8601() end?: string;
+}
+
+@Roles('BARBER')
 @Controller('schedule-blocks')
-@UseGuards(AuthGuard('jwt'))
 export class ScheduleBlocksController {
-  constructor(private readonly scheduleBlocksService: ScheduleBlocksService) {}
+  constructor(private readonly scheduleBlocks: ScheduleBlocksService) {}
 
   @Post()
-  async createBlock(@Body() body: { barberId?: string; startTime: string; endTime: string; reason?: string }, @Request() req: any) {
-    const isBarberOrAdmin = req.user.role === 'BARBER' || req.user.isAdmin;
-    if (!isBarberOrAdmin) throw new BadRequestException('Acesso negado');
+  async create(
+    @Body() body: CreateBlockDto,
+    @Request() req: { user: SessionUser },
+  ) {
+    const targetBarberId = body.barberId ?? req.user.id;
 
-    // Se não mandar barberId e for barbeiro, usa o próprio ID
-    let targetBarberId = body.barberId;
-    if (!targetBarberId) {
-      if (req.user.role === 'BARBER') {
-        targetBarberId = req.user.id as string;
-      } else {
-        throw new BadRequestException('barberId é obrigatório para admin');
-      }
-    }
-
-    // Apenas admin pode bloquear para outros
     if (targetBarberId !== req.user.id && !req.user.isAdmin) {
-      throw new BadRequestException('Acesso negado');
+      throw new ForbiddenException(
+        'Apenas administradores bloqueiam a agenda de outro profissional.',
+      );
     }
 
-    return this.scheduleBlocksService.createBlock(
-      targetBarberId, 
-      new Date(body.startTime), 
-      new Date(body.endTime), 
-      body.reason
+    return this.scheduleBlocks.createBlock(
+      targetBarberId,
+      new Date(body.startTime),
+      new Date(body.endTime),
+      body.reason,
     );
   }
 
   @Get()
-  async getBlocks(@Query('barberId') barberId: string, @Query('start') start: string, @Query('end') end: string, @Request() req: any) {
-    let targetBarberId = barberId;
-    if (!targetBarberId && req.user.role === 'BARBER') {
-      targetBarberId = req.user.id as string;
+  async list(
+    @Query() query: ListBlocksQueryDto,
+    @Request() req: { user: SessionUser },
+  ) {
+    const targetBarberId = query.barberId ?? req.user.id;
+
+    if (targetBarberId !== req.user.id && !req.user.isAdmin) {
+      throw new ForbiddenException(
+        'Você só pode consultar os próprios bloqueios.',
+      );
     }
-    
-    if (!targetBarberId) throw new BadRequestException('barberId é obrigatório');
+    if (!targetBarberId) {
+      throw new BadRequestException('Informe o profissional.');
+    }
 
-    const startDate = start ? new Date(start) : undefined;
-    const endDate = end ? new Date(end) : undefined;
-
-    return this.scheduleBlocksService.getBlocks(targetBarberId, startDate, endDate);
+    return this.scheduleBlocks.getBlocks(
+      targetBarberId,
+      query.start ? new Date(query.start) : undefined,
+      query.end ? new Date(query.end) : undefined,
+    );
   }
 
   @Delete(':id')
-  async deleteBlock(@Param('id') id: string, @Request() req: any) {
-    return this.scheduleBlocksService.deleteBlock(id, req.user.id, req.user.isAdmin);
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: { user: SessionUser },
+  ) {
+    return this.scheduleBlocks.deleteBlock(id, req.user.id, req.user.isAdmin);
   }
 }
