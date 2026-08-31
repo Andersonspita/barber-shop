@@ -209,7 +209,9 @@ export class NotificationsService {
 }
 
 function reminderJobId(appointmentId: string): string {
-  return `reminder:${appointmentId}`;
+  // Sem dois-pontos: o BullMQ recusa esse caractere em id customizado, e a
+  // falha derrubava silenciosamente o lembrete de 2 horas.
+  return `reminder-${appointmentId}`;
 }
 
 function firstName(name?: string | null): string {

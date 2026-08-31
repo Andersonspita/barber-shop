@@ -4,3 +4,6 @@ node_modules
 
 /generated/prisma
 /dist
+
+# Dump do Redis, caso ele seja rodado a partir desta pasta em desenvolvimento
+dump.rdb

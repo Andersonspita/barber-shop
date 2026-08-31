@@ -1,406 +1,456 @@
-"use client";
+'use client';
 
-import React, { useEffect, useState } from 'react';
-import { API_URL } from '@/lib/api';
-import { useRouter } from 'next/navigation';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import React, { useCallback, useState } from 'react';
+import {
+  CalendarDays,
+  CalendarRange,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Lock,
+  Plus,
+  UserX,
+  X,
+} from 'lucide-react';
+import { ApiError, api } from '@/lib/api';
+import { useSession } from '@/lib/use-session';
+import { useAsyncData } from '@/lib/use-async-data';
+import { staffNav } from '@/lib/nav';
+import {
+  addDaysISO,
+  formatBRL,
+  formatDateLong,
+  formatDuration,
+  formatPhone,
+  formatTime,
+  todayISO,
+} from '@/lib/format';
+import { AppHeader, PageHeading } from '@/components/app-header';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card, StatCard } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/modal';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Skeleton, SkeletonList } from '@/components/ui/skeleton';
+import { useToast } from '@/components/ui/toast';
+import { RescheduleForm } from '@/components/reschedule-form';
+import { BlockScheduleDialog } from '@/components/block-schedule-dialog';
+import { WalkInDialog } from '@/components/walk-in-dialog';
+import { cn } from '@/lib/cn';
 
 interface Appointment {
   id: string;
   startTime: string;
   endTime: string;
-  status: string;
-  client: { name: string; email: string };
-  service: { name: string; durationMinutes: number; price: number };
+  status: 'SCHEDULED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
+  priceCharged: string | number;
+  notes: string | null;
+  client: { id: string; name: string; email: string; phoneNumber: string | null };
+  service: { id: string; name: string; durationMinutes: number };
+  barber: { id: string; name: string; photoUrl: string | null };
 }
 
 interface Metrics {
   totalRevenue: number;
   completedCount: number;
   pendingCount: number;
+  noShowCount: number;
 }
 
-export default function Dashboard() {
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [toastMessage, setToastMessage] = useState<{title: string, desc: string, type?: 'error' | 'success'} | null>(null);
-  
-  // States para Bloqueio de Horário
-  const [isBlockModalOpen, setIsBlockModalOpen] = useState(false);
-  const [blockStartTime, setBlockStartTime] = useState('');
-  const [blockEndTime, setBlockEndTime] = useState('');
-  const [blockReason, setBlockReason] = useState('');
+const STATUS: Record<
+  Appointment['status'],
+  { label: string; tone: 'brand' | 'success' | 'danger' | 'neutral' }
+> = {
+  SCHEDULED: { label: 'Confirmado', tone: 'brand' },
+  COMPLETED: { label: 'Concluído', tone: 'success' },
+  CANCELLED: { label: 'Cancelado', tone: 'danger' },
+  NO_SHOW: { label: 'Faltou', tone: 'neutral' },
+};
 
-  const router = useRouter();
+export default function DashboardPage() {
+  const { user, ready } = useSession('STAFF');
+  const toast = useToast();
 
-  const showToast = (title: string, desc: string, type: 'error' | 'success' = 'error') => {
-    setToastMessage({ title, desc, type });
-    setTimeout(() => setToastMessage(null), 5000);
-  };
+  const [date, setDate] = useState(todayISO());
 
-  const fetchDashboardData = async () => {
-    const token = localStorage.getItem('access_token');
-    const role = localStorage.getItem('user_role');
-    
-    if (!token) {
-      router.push('/login?role=barbeiro');
-      return;
-    }
+  const [blockOpen, setBlockOpen] = useState(false);
+  const [walkInOpen, setWalkInOpen] = useState(false);
+  const [rescheduling, setRescheduling] = useState<Appointment | null>(null);
+  const [confirming, setConfirming] = useState<{
+    appointment: Appointment;
+    status: 'CANCELLED' | 'NO_SHOW';
+  } | null>(null);
+  const [pending, setPending] = useState(false);
 
-    if (role === 'CLIENT') {
-      router.push('/reservas');
-      return;
-    }
+  // A agenda passa a ser sempre de um dia. Antes a rota devolvia todo o
+  // histórico do barbeiro em ordem crescente, o que empurrava os
+  // atendimentos de hoje para o fim da lista.
+  const fetchAgenda = useCallback(async () => {
+    if (!ready) return null;
 
+    const [list, todayMetrics] = await Promise.all([
+      api<{ items: Appointment[] }>('/appointments/me', {
+        auth: true,
+        query: { from: date, to: date, pageSize: 100 },
+      }),
+      api<Metrics>('/appointments/metrics/today', { auth: true }),
+    ]);
+
+    return { appointments: list.items, metrics: todayMetrics };
+  }, [ready, date]);
+
+  const { data, loading, error, reload: load } = useAsyncData(fetchAgenda);
+  const appointments = data?.appointments ?? [];
+  const metrics = data?.metrics ?? null;
+
+  const updateStatus = async (
+    appointment: Appointment,
+    status: Appointment['status'],
+  ) => {
+    setPending(true);
     try {
-      // Fetch agenda e métricas em paralelo
-      const [apptsRes, metricsRes] = await Promise.all([
-        fetch(`${API_URL}/appointments/me`, { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch(`${API_URL}/appointments/metrics/today`, { headers: { 'Authorization': `Bearer ${token}` } })
-      ]);
-
-      if (!apptsRes.ok || !metricsRes.ok) {
-        if (apptsRes.status === 401 || metricsRes.status === 401) {
-          localStorage.removeItem('access_token');
-          router.push('/login?role=barbeiro');
-        }
-        throw new Error('Falha ao buscar dados');
-      }
-
-      setAppointments(await apptsRes.json());
-      setMetrics(await metricsRes.json());
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchDashboardData();
-  }, [router]);
-
-  const handleLogout = () => {
-    localStorage.removeItem('access_token');
-    router.push('/login?role=barbeiro');
-  };
-
-  const handleUpdateStatus = async (id: string, status: string) => {
-    const token = localStorage.getItem('access_token');
-    if (!token) return;
-
-    try {
-      const res = await fetch(`${API_URL}/appointments/${id}/status`, {
+      await api(`/appointments/${appointment.id}/status`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ status })
+        auth: true,
+        body: { status },
       });
-
-      if (res.ok) {
-        // Atualiza a tela recarregando os dados silenciosamente
-        fetchDashboardData();
-      } else {
-        const errorData = await res.json();
-        
-        if (errorData.message === 'Não é possível concluir um agendamento antes do seu horário de início.') {
-          showToast('Calma lá! ⏳', 'O agendamento ainda não começou. Aguarde o horário marcado para concluí-lo!');
-        } else {
-          showToast('Opa!', errorData.message || 'Falha ao atualizar o status do agendamento.');
-        }
-      }
-    } catch (error) {
-      console.error(error);
+      toast.success(
+        status === 'COMPLETED'
+          ? 'Atendimento concluído'
+          : status === 'NO_SHOW'
+            ? 'Falta registrada'
+            : 'Agendamento cancelado',
+      );
+      setConfirming(null);
+      void load();
+    } catch (caught) {
+      toast.error(
+        'Não foi possível atualizar',
+        caught instanceof ApiError ? caught.message : undefined,
+      );
+    } finally {
+      setPending(false);
     }
   };
 
-  const handleCreateBlock = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const token = localStorage.getItem('access_token');
-    if (!token) return;
+  if (!ready || !user) return null;
 
-    try {
-      const res = await fetch(`${API_URL}/schedule-blocks`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ 
-          startTime: new Date(blockStartTime).toISOString(),
-          endTime: new Date(blockEndTime).toISOString(),
-          reason: blockReason
-        })
-      });
-
-      if (res.ok) {
-        showToast('Sucesso!', 'Horário bloqueado com sucesso.', 'success');
-        setIsBlockModalOpen(false);
-        setBlockStartTime('');
-        setBlockEndTime('');
-        setBlockReason('');
-      } else {
-        const errorData = await res.json();
-        showToast('Opa!', errorData.message || 'Falha ao bloquear horário.');
-      }
-    } catch (error) {
-      console.error(error);
-      showToast('Erro', 'Ocorreu um erro ao tentar bloquear a agenda.');
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-950 text-amber-500">
-        <div className="animate-pulse font-bold text-xl tracking-widest uppercase">Carregando Agenda...</div>
-      </div>
-    );
-  }
-
-  const isAdmin = typeof window !== 'undefined' ? localStorage.getItem('is_admin') === 'true' : false;
-  const userName = typeof window !== 'undefined' ? localStorage.getItem('user_name') || 'Barbeiro' : 'Barbeiro';
+  const isToday = date === todayISO();
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans relative">
-      
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-5">
-          <div className={`border rounded-2xl p-4 flex items-start gap-4 shadow-2xl backdrop-blur-md max-w-sm w-full ${toastMessage.type === 'success' ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
-            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl ${toastMessage.type === 'success' ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>
-              {toastMessage.type === 'success' ? '✅' : '⚠️'}
-            </div>
-            <div>
-              <h3 className={`text-sm font-bold mb-1 ${toastMessage.type === 'success' ? 'text-green-500' : 'text-red-500'}`}>{toastMessage.title}</h3>
-              <p className={`text-xs leading-relaxed ${toastMessage.type === 'success' ? 'text-green-400/90' : 'text-red-400/90'}`}>{toastMessage.desc}</p>
-            </div>
-            <button onClick={() => setToastMessage(null)} className={`ml-auto ${toastMessage.type === 'success' ? 'text-green-500/50 hover:text-green-500' : 'text-red-500/50 hover:text-red-500'}`}>
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
-      <header className="sticky top-0 z-50 border-b border-neutral-800 bg-neutral-950/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-3 sm:h-16 sm:flex-row sm:items-center sm:justify-between sm:gap-0 sm:px-6 sm:py-0">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-neutral-950 font-black text-sm">
-              GB
-            </div>
-            <div>
-              <h1 className="text-sm font-bold text-white leading-none">Painel de Controle</h1>
-              <span className="text-xs text-neutral-500">Área de {userName}</span>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:flex-nowrap sm:justify-end">
-            {isAdmin && (
-              <>
-                <button
-                  onClick={() => router.push('/dashboard/clientes')}
-                  className="text-xs font-bold uppercase tracking-wider text-amber-500 hover:text-amber-400 transition-colors"
-                >
-                  👥 Clientes
-                </button>
-                <button
-                  onClick={() => router.push('/dashboard/barbeiros')}
-                  className="text-xs font-bold uppercase tracking-wider text-amber-500 hover:text-amber-400 transition-colors"
-                >
-                  ✂️ Equipe
-                </button>
-                <button
-                  onClick={() => router.push('/dashboard/servicos')}
-                  className="text-xs font-bold uppercase tracking-wider text-amber-500 hover:text-amber-400 transition-colors"
-                >
-                  ⚙️ Serviços
-                </button>
-              </>
-            )}
-            <button
-              onClick={() => router.push('/dashboard/financeiro')}
-              className="text-xs font-bold uppercase tracking-wider text-green-500 hover:text-green-400 transition-colors sm:mr-2"
-            >
-              💰 Financeiro
-            </button>
-            <button
-              onClick={handleLogout}
-              className="text-xs font-bold uppercase tracking-wider text-neutral-400 hover:text-red-400 transition-colors"
-            >
-              Sair
-            </button>
-          </div>
-        </div>
-      </header>
+    <>
+      <AppHeader
+        area="Painel"
+        subtitle={user.name}
+        items={staffNav(user.isAdmin)}
+        loginPath="/login?area=profissional"
+      />
 
-      <main className="mx-auto max-w-6xl px-6 py-8 md:py-12">
-        {/* Painel de Métricas */}
-        {metrics && (
-          <section className="mb-10 grid grid-cols-2 gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">Faturamento Hoje</h3>
-              <p className="text-3xl font-black text-amber-500 mt-2">R$ {metrics.totalRevenue.toFixed(2).replace('.', ',')}</p>
-            </div>
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">Concluídos</h3>
-              <p className="text-3xl font-black text-white mt-2">{metrics.completedCount}</p>
-            </div>
-            <div className="col-span-2 md:col-span-1 rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">Pendentes</h3>
-              <p className="text-3xl font-black text-neutral-400 mt-2">{metrics.pendingCount}</p>
-            </div>
-          </section>
+      <main id="conteudo" className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+        <PageHeading
+          title="Sua agenda"
+          description="Atendimentos do dia, com o que fazer em cada um."
+          actions={
+            <>
+              <Button variant="secondary" onClick={() => setBlockOpen(true)}>
+                <Lock className="h-4 w-4" aria-hidden="true" />
+                Bloquear horário
+              </Button>
+              <Button onClick={() => setWalkInOpen(true)}>
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                Encaixe
+              </Button>
+            </>
+          }
+        />
+
+        {error && error.status !== 401 && (
+          <p
+            role="alert"
+            className="mb-6 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm font-medium text-danger"
+          >
+            {error.message}
+          </p>
         )}
 
-        <div className="mb-8 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div>
-            <h2 className="text-3xl font-extrabold text-white tracking-tight">Sua Agenda</h2>
-            <p className="text-neutral-400 mt-1">Visão geral dos seus atendimentos registrados.</p>
-          </div>
-          <div className="flex gap-3">
-            <button 
-              onClick={() => setIsBlockModalOpen(true)}
-              className="rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm text-neutral-300 font-bold hover:bg-neutral-800 transition-colors"
+        {/* ----------------------------------------------------- métricas */}
+        <section
+          aria-label="Resumo de hoje"
+          className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4"
+        >
+          {loading && !metrics ? (
+            Array.from({ length: 4 }, (_, index) => (
+              <Skeleton key={index} className="h-28" />
+            ))
+          ) : (
+            <>
+              <StatCard
+                label="Faturamento hoje"
+                value={formatBRL(metrics?.totalRevenue ?? 0)}
+                tone="brand"
+              />
+              <StatCard
+                label="Concluídos"
+                value={metrics?.completedCount ?? 0}
+                tone="success"
+              />
+              <StatCard label="Pendentes" value={metrics?.pendingCount ?? 0} />
+              <StatCard
+                label="Faltas"
+                value={metrics?.noShowCount ?? 0}
+                tone={metrics?.noShowCount ? 'danger' : 'default'}
+              />
+            </>
+          )}
+        </section>
+
+        {/* ------------------------------------------------ seletor de dia */}
+        <div className="mb-5 flex flex-wrap items-center gap-3">
+          <div className="flex items-center rounded-xl border border-line bg-surface-1">
+            <button
+              type="button"
+              onClick={() => setDate(addDaysISO(date, -1))}
+              aria-label="Dia anterior"
+              className="rounded-l-xl p-3 text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
             >
-              Bloquear Horário
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
             </button>
-            <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 px-4 py-2 text-sm text-neutral-300 font-medium">
-              {format(new Date(), "EEEE, dd 'de' MMMM", { locale: ptBR })}
-            </div>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              aria-label="Data da agenda"
+              className="border-x border-line bg-transparent px-3 py-2.5 text-sm font-semibold text-ink"
+            />
+            <button
+              type="button"
+              onClick={() => setDate(addDaysISO(date, 1))}
+              aria-label="Próximo dia"
+              className="rounded-r-xl p-3 text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+            >
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
+            </button>
           </div>
+
+          {!isToday && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDate(todayISO())}
+            >
+              Voltar para hoje
+            </Button>
+          )}
+
+          <p className="ml-auto text-sm font-semibold capitalize text-ink-muted">
+            {formatDateLong(date)}
+          </p>
         </div>
 
-        {appointments.length === 0 ? (
-          <div className="rounded-3xl border border-neutral-800 border-dashed bg-neutral-900/20 p-12 text-center">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-neutral-800 text-neutral-500 text-2xl">
-              📅
-            </div>
-            <h3 className="text-lg font-bold text-white">Nenhum agendamento</h3>
-            <p className="text-sm text-neutral-400 mt-1">Sua agenda está livre por enquanto.</p>
-          </div>
+        {/* ------------------------------------------------------- agenda */}
+        {loading ? (
+          <SkeletonList count={3} className="h-32" />
+        ) : appointments.length === 0 ? (
+          <EmptyState
+            icon={<CalendarDays className="h-6 w-6" aria-hidden="true" />}
+            title="Agenda livre neste dia"
+            description="Quando alguém marcar, o atendimento aparece aqui — e você também pode registrar um encaixe."
+            action={
+              <Button onClick={() => setWalkInOpen(true)}>
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                Registrar encaixe
+              </Button>
+            }
+          />
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {appointments.map((appt) => {
-              const start = new Date(appt.startTime);
-              const isScheduled = appt.status === 'SCHEDULED';
-              
-              return (
-                <div 
-                  key={appt.id} 
-                  className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl border transition-all p-5
-                    ${isScheduled ? 'border-neutral-800 bg-neutral-900 hover:border-neutral-700 hover:bg-neutral-800/80 hover:shadow-xl' : 'border-neutral-800/50 bg-neutral-900/30 opacity-75'}
-                  `}
-                >
-                  {isScheduled && <div className="absolute left-0 top-0 h-full w-1 bg-amber-500/80 group-hover:bg-amber-400 transition-colors" />}
-                  {!isScheduled && appt.status === 'COMPLETED' && <div className="absolute left-0 top-0 h-full w-1 bg-green-500/50" />}
-                  {!isScheduled && appt.status === 'CANCELLED' && <div className="absolute left-0 top-0 h-full w-1 bg-red-500/50" />}
-                  
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-bold ring-1 ring-inset ${isScheduled ? 'bg-neutral-800 text-amber-500 ring-amber-500/20' : 'bg-transparent text-neutral-500 ring-neutral-700'}`}>
-                        {format(start, 'dd/MM')} às {format(start, 'HH:mm')}
-                      </span>
-                    </div>
-                    {appt.status === 'COMPLETED' && (
-                      <span className="text-xs font-semibold uppercase tracking-wider text-green-400 bg-green-400/10 px-2 py-1 rounded-md">Concluído</span>
-                    )}
-                    {appt.status === 'CANCELLED' && (
-                      <span className="text-xs font-semibold uppercase tracking-wider text-red-400 bg-red-400/10 px-2 py-1 rounded-md">Cancelado</span>
-                    )}
-                  </div>
-
-                  <div>
-                    <h3 className={`text-lg font-bold mb-1 ${isScheduled ? 'text-white' : 'text-neutral-400'}`}>{appt.client.name}</h3>
-                    <p className="text-xs text-neutral-500 mb-4">{appt.client.email}</p>
-                    
-                    <div className="rounded-xl bg-neutral-950 p-3 border border-neutral-800/50 mb-4">
-                      <div className="flex justify-between items-center mb-1">
-                        <span className={`text-sm font-medium ${isScheduled ? 'text-neutral-300' : 'text-neutral-500'}`}>{appt.service.name}</span>
-                        <span className={`text-sm font-bold ${isScheduled ? 'text-white' : 'text-neutral-500'}`}>R$ {appt.service.price}</span>
-                      </div>
-                      <div className="text-xs text-neutral-500">
-                        Duração: {appt.service.durationMinutes} min
-                      </div>
-                    </div>
-
-                    {isScheduled && (
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={() => handleUpdateStatus(appt.id, 'COMPLETED')}
-                          className="flex-1 rounded-lg bg-green-500/10 border border-green-500/20 px-3 py-2 text-xs font-bold text-green-500 hover:bg-green-500 hover:text-white transition-colors"
-                        >
-                          Concluir
-                        </button>
-                        <button 
-                          onClick={() => handleUpdateStatus(appt.id, 'CANCELLED')}
-                          className="flex-1 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-xs font-bold text-red-500 hover:bg-red-500 hover:text-white transition-colors"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <ol className="space-y-3">
+            {appointments.map((appointment) => (
+              <li key={appointment.id}>
+                <AppointmentRow
+                  appointment={appointment}
+                  pending={pending}
+                  onComplete={() => updateStatus(appointment, 'COMPLETED')}
+                  onCancel={() =>
+                    setConfirming({ appointment, status: 'CANCELLED' })
+                  }
+                  onNoShow={() =>
+                    setConfirming({ appointment, status: 'NO_SHOW' })
+                  }
+                  onReschedule={() => setRescheduling(appointment)}
+                />
+              </li>
+            ))}
+          </ol>
         )}
       </main>
 
-      {/* Modal de Bloqueio de Horário */}
-      {isBlockModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-3xl border border-neutral-800 bg-neutral-950 p-6 shadow-2xl">
-            <h2 className="text-xl font-bold text-white mb-2">Bloquear Horário</h2>
-            <p className="text-sm text-neutral-400 mb-6">Defina um período em que você não estará disponível (ex: almoço, folga).</p>
-            <form onSubmit={handleCreateBlock} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Início</label>
-                <input 
-                  type="datetime-local" required
-                  value={blockStartTime} onChange={e => setBlockStartTime(e.target.value)}
-                  className="w-full rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-3 text-sm text-white focus:border-amber-500 focus:outline-none"
-                  style={{ colorScheme: 'dark' }}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Término</label>
-                <input 
-                  type="datetime-local" required
-                  value={blockEndTime} onChange={e => setBlockEndTime(e.target.value)}
-                  className="w-full rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-3 text-sm text-white focus:border-amber-500 focus:outline-none"
-                  style={{ colorScheme: 'dark' }}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Motivo (Opcional)</label>
-                <input 
-                  type="text" 
-                  value={blockReason} onChange={e => setBlockReason(e.target.value)}
-                  className="w-full rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-3 text-sm text-white focus:border-amber-500 focus:outline-none"
-                  placeholder="Ex: Horário de Almoço"
-                />
-              </div>
-              <div className="flex gap-3 mt-6">
-                <button 
-                  type="button" 
-                  onClick={() => setIsBlockModalOpen(false)}
-                  className="w-1/2 rounded-xl border border-neutral-700 bg-transparent px-4 py-3 text-sm font-bold text-neutral-400 hover:text-white transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button 
-                  type="submit" 
-                  className="w-1/2 rounded-xl bg-amber-500 px-4 py-3 text-sm font-bold text-neutral-950 hover:bg-amber-400 transition-colors shadow-[0_0_15px_rgba(245,158,11,0.2)]"
-                >
-                  Confirmar
-                </button>
-              </div>
-            </form>
+      <BlockScheduleDialog
+        open={blockOpen}
+        onClose={() => setBlockOpen(false)}
+        onDone={() => {
+          setBlockOpen(false);
+          void load();
+        }}
+      />
+
+      <WalkInDialog
+        open={walkInOpen}
+        date={date}
+        onClose={() => setWalkInOpen(false)}
+        onDone={() => {
+          setWalkInOpen(false);
+          void load();
+        }}
+      />
+
+      {rescheduling && (
+        <RescheduleForm
+          appointment={rescheduling}
+          onClose={() => setRescheduling(null)}
+          onDone={() => {
+            setRescheduling(null);
+            void load();
+          }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={confirming !== null}
+        title={
+          confirming?.status === 'NO_SHOW'
+            ? 'Registrar falta?'
+            : 'Cancelar atendimento?'
+        }
+        description={
+          confirming
+            ? confirming.status === 'NO_SHOW'
+              ? `${confirming.appointment.client.name} não compareceu ao horário de ${formatTime(confirming.appointment.startTime)}. A falta fica registrada na ficha do cliente.`
+              : `O horário de ${formatTime(confirming.appointment.startTime)} com ${confirming.appointment.client.name} volta para a agenda e o cliente é avisado.`
+            : ''
+        }
+        confirmLabel={
+          confirming?.status === 'NO_SHOW' ? 'Registrar falta' : 'Cancelar'
+        }
+        cancelLabel="Voltar"
+        loading={pending}
+        onConfirm={() =>
+          confirming && updateStatus(confirming.appointment, confirming.status)
+        }
+        onCancel={() => setConfirming(null)}
+      />
+    </>
+  );
+}
+
+function AppointmentRow({
+  appointment,
+  pending,
+  onComplete,
+  onCancel,
+  onNoShow,
+  onReschedule,
+}: {
+  appointment: Appointment;
+  pending: boolean;
+  onComplete: () => void;
+  onCancel: () => void;
+  onNoShow: () => void;
+  onReschedule: () => void;
+}) {
+  const status = STATUS[appointment.status];
+  const isScheduled = appointment.status === 'SCHEDULED';
+
+  return (
+    <Card className={cn('p-5', !isScheduled && 'opacity-75')}>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-start gap-4">
+          {/* Hora em destaque: é por ela que o barbeiro procura na lista. */}
+          <div className="shrink-0 text-center">
+            <p className="font-display text-xl font-extrabold tabular text-brand-400">
+              {formatTime(appointment.startTime)}
+            </p>
+            <p className="text-xs tabular text-ink-subtle">
+              {formatDuration(appointment.service.durationMinutes)}
+            </p>
+          </div>
+
+          <div className="min-w-0">
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <h2 className="font-display text-base font-bold text-ink">
+                {appointment.client.name}
+              </h2>
+              <Badge tone={status.tone}>{status.label}</Badge>
+            </div>
+
+            <p className="text-sm text-ink-muted">
+              {appointment.service.name} ·{' '}
+              <span className="tabular">
+                {formatBRL(appointment.priceCharged)}
+              </span>
+            </p>
+
+            {appointment.client.phoneNumber && (
+              <a
+                href={`https://wa.me/${appointment.client.phoneNumber.replace(/\D/g, '')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1 inline-block text-xs font-semibold tabular text-ink-subtle transition-colors hover:text-brand-400"
+              >
+                {formatPhone(appointment.client.phoneNumber)}
+              </a>
+            )}
+
+            {appointment.notes && (
+              <p className="mt-2 rounded-lg bg-surface-2 px-3 py-2 text-xs italic text-ink-muted">
+                “{appointment.notes}”
+              </p>
+            )}
           </div>
         </div>
-      )}
-    </div>
+
+        {isScheduled && (
+          <div className="flex flex-wrap gap-2 lg:shrink-0">
+            <Button
+              variant="success"
+              size="sm"
+              disabled={pending}
+              onClick={onComplete}
+            >
+              <Check className="h-4 w-4" aria-hidden="true" />
+              Concluir
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={pending}
+              onClick={onReschedule}
+            >
+              <CalendarRange className="h-4 w-4" aria-hidden="true" />
+              Remarcar
+            </Button>
+            {/* NO_SHOW existia no schema desde o início e não tinha como ser
+                registrado por nenhuma tela. */}
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={pending}
+              onClick={onNoShow}
+            >
+              <UserX className="h-4 w-4" aria-hidden="true" />
+              Faltou
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={pending}
+              onClick={onCancel}
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+              Cancelar
+            </Button>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
