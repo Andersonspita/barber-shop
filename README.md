@@ -7,6 +7,9 @@ instalação**, cada uma com endereço, equipe, clientes e agenda próprios.
 Backend em `backend/` (NestJS + Prisma + BullMQ) e frontend em `frontend/`
 (Next.js 16 + Tailwind 4).
 
+**Guia de uso** com as telas, para clientes, barbeiros, administradores e
+operador da plataforma: [`docs/guia-de-uso.pdf`](docs/guia-de-uso.pdf).
+
 ## O que o sistema faz
 
 **Cliente** — vê serviços, preços e equipe na página inicial; agenda escolhendo
@@ -52,7 +55,9 @@ barbearia que já estava no ar vira a `principal`, com todos os dados, em
 `APP_URL/principal`. Para que links antigos da API sem barbearia continuem
 funcionando, defina `DEFAULT_SHOP_SLUG=principal` no `.env`. Os links antigos
 do site (`APP_URL/reservas`, `APP_URL/login`) passam a dar 404; divulgue o novo
-endereço. O slug pode ser trocado no painel da plataforma.
+endereço. O slug pode ser trocado pela API da plataforma
+(`PATCH /platform/shops/<id>` com `{"slug": "novo-endereco"}` e o cabeçalho
+`X-Platform-Key`); a tela `/plataforma` ainda não tem esse campo.
 
 ## Configuração da agenda
 

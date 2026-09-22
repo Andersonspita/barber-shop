@@ -847,7 +847,7 @@ function HolidaysTab() {
               <Card className="flex items-center justify-between gap-4 p-4">
                 <div>
                   <p className="font-semibold tabular text-ink">
-                    {formatDate(holiday.date)}
+                    {formatDate(holiday.date.slice(0, 10))}
                   </p>
                   <p className="text-xs text-ink-subtle">
                     {holiday.description}
@@ -857,7 +857,7 @@ function HolidaysTab() {
                   variant="ghost"
                   size="sm"
                   onClick={() => remove(holiday)}
-                  aria-label={`Remover fechamento de ${formatDate(holiday.date)}`}
+                  aria-label={`Remover fechamento de ${formatDate(holiday.date.slice(0, 10))}`}
                 >
                   <Trash2 className="h-4 w-4" aria-hidden="true" />
                 </Button>
