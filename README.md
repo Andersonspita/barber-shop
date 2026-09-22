@@ -1,7 +1,8 @@
 # barber-shop
 
-Gerenciador de barbearia: agendamento online para o cliente, painel de agenda
-para o barbeiro e administração para o dono.
+Gerenciador de barbearias: agendamento online para o cliente, painel de agenda
+para o barbeiro e administração para o dono — **várias barbearias na mesma
+instalação**, cada uma com endereço, equipe, clientes e agenda próprios.
 
 Backend em `backend/` (NestJS + Prisma + BullMQ) e frontend em `frontend/`
 (Next.js 16 + Tailwind 4).
@@ -21,10 +22,42 @@ horário; relatório financeiro com comissão.
 (com jornada semanal e comissão por profissional), serviços, feriados e as
 regras da agenda.
 
+## Várias barbearias (multi-tenant)
+
+Cada barbearia tem a própria vitrine em `APP_URL/<slug>` — por exemplo
+`https://seudominio.com/navalha-de-ouro`. É esse o link que ela divulga. Tudo
+abaixo dele é só dela: agendamento (`/<slug>/reservas/nova`), login
+(`/<slug>/login`) e painel (`/<slug>/dashboard`). A raiz (`APP_URL/`) lista as
+barbearias ativas.
+
+**Isolamento.** Serviços, equipe, clientes, agendamentos, feriados, bloqueios,
+lista de espera e financeiro são sempre filtrados pela barbearia. O admin de
+uma não vê nem altera nada da outra — um id de outra barbearia responde como
+inexistente. O teste `backend/test/tenant-isolation.e2e-spec.ts` cobre esses
+cenários contra um banco real.
+
+**Contas.** Cada conta pertence a uma barbearia. O mesmo e-mail pode ter conta
+em várias, como contas independentes (senha e histórico próprios). O navegador
+guarda uma sessão por barbearia, e o token de uma é recusado na página de outra.
+
+**Painel da plataforma** (`APP_URL/plataforma`). Onde você, que opera o sistema,
+cadastra barbearias, suspende e liga o WhatsApp de cada uma. O acesso é a chave
+`PLATFORM_ADMIN_KEY` do `.env` — sem ela o painel fica desligado. Ao criar uma
+barbearia, ela já nasce com o primeiro administrador; a senha temporária
+aparece uma única vez e a troca é obrigatória no primeiro acesso. Suspender
+tira a vitrine do ar e derruba as sessões na hora.
+
+**Atualizando uma instalação que já existe.** A migração não apaga nada: a
+barbearia que já estava no ar vira a `principal`, com todos os dados, em
+`APP_URL/principal`. Para que links antigos da API sem barbearia continuem
+funcionando, defina `DEFAULT_SHOP_SLUG=principal` no `.env`. Os links antigos
+do site (`APP_URL/reservas`, `APP_URL/login`) passam a dar 404; divulgue o novo
+endereço. O slug pode ser trocado no painel da plataforma.
+
 ## Configuração da agenda
 
-Tudo que define os horários fica no banco, editável em **Painel → Barbearia →
-Ajustes** — não em variável de ambiente nem no código:
+Tudo que define os horários fica no banco, por barbearia, editável em
+**Painel → Barbearia → Ajustes** — não em variável de ambiente nem no código:
 
 - **Fuso horário** da barbearia (padrão `America/Sao_Paulo`). O contêiner roda
   em UTC; a conversão é feita pela aplicação.
@@ -51,8 +84,8 @@ Pré-requisito: Docker e Docker Compose instalados no VPS ([guia oficial](https:
    cp .env.example .env
    nano .env
    ```
-   Preencha `POSTGRES_PASSWORD` e `JWT_SECRET` com valores fortes (gere com
-   `openssl rand -base64 48`) e ajuste `APP_URL` para o endereço público do
+   Preencha `POSTGRES_PASSWORD`, `JWT_SECRET` e `PLATFORM_ADMIN_KEY` com
+   valores fortes (gere com `openssl rand -base64 48`) e ajuste `APP_URL` para o endereço público do
    site — ele entra nos links de recuperação de senha e define a origem aceita
    pelo CORS. Deixe `NEXT_PUBLIC_API_URL` vazio para o frontend chamar a API
    pelo mesmo domínio, através do nginx.
@@ -84,10 +117,12 @@ Pré-requisito: Docker e Docker Compose instalados no VPS ([guia oficial](https:
 
 ### Primeiro acesso
 
-Sem dados no banco, cadastre o primeiro administrador direto pelo banco ou rode
-o seed de exemplo (abaixo) e troque as senhas em seguida. Contas criadas pelo
-administrador recebem uma **senha temporária sorteada**, mostrada uma única vez
-na tela, e a troca é obrigatória no primeiro login.
+Abra `APP_URL/plataforma`, entre com a `PLATFORM_ADMIN_KEY` e cadastre a
+primeira barbearia com o administrador dela. Ele entra em
+`APP_URL/<slug>/login?area=profissional` e monta equipe, serviços e horários.
+Contas criadas pelo administrador também recebem uma **senha temporária
+sorteada**, mostrada uma única vez na tela, e a troca é obrigatória no primeiro
+login.
 
 ### Atualizando após um novo push
 
@@ -121,13 +156,18 @@ EVOLUTION_API_KEY=sua-chave
 EVOLUTION_INSTANCE=barbearia
 ```
 
+Essa é a instância padrão da plataforma. Cada barbearia pode ter o próprio
+número: conecte uma instância nova na Evolution API e informe o nome dela na
+barbearia, em `APP_URL/plataforma`. Sem instância própria, as mensagens da
+barbearia saem pelo número padrão, sempre com o nome dela no texto.
+
 **Sem essas variáveis o sistema continua funcionando normalmente**: as mensagens
 vão para o log do backend (`docker compose logs backend`) em vez de sair pelo
 WhatsApp. Útil para testar antes de conectar o número.
 
 O lembrete sai 2 horas antes por padrão (`REMINDER_HOURS_BEFORE`) e é retirado
 da fila automaticamente se o agendamento for cancelado ou remarcado. As
-felicitações de aniversário saem às 9h no fuso da barbearia
+felicitações de aniversário saem às 9h no fuso de cada barbearia
 (`BIRTHDAY_GREETING_HOUR`).
 
 ## Populando dados de teste (opcional)
@@ -136,9 +176,10 @@ felicitações de aniversário saem às 9h no fuso da barbearia
 docker compose exec backend npx prisma db seed
 ```
 
-Cria dois profissionais, quatro serviços, um cliente e a jornada da semana. As
-credenciais aparecem no final da saída do comando. **Troque as senhas antes de
-usar em produção.**
+Cria duas barbearias — `principal` (São Paulo) e `navalha-de-ouro` (Recife) —
+com equipe, serviços, jornada da semana e o mesmo cliente cadastrado nas duas,
+para ver o isolamento na prática. As credenciais aparecem no final da saída do
+comando. **O seed apaga os dados existentes: não rode em produção.**
 
 ## Desenvolvimento
 
@@ -151,10 +192,16 @@ cd frontend && npm install && npm run dev
 ```
 
 O backend precisa de Postgres e Redis acessíveis (veja `DATABASE_URL`,
-`REDIS_HOST` e `REDIS_PORT`).
+`REDIS_HOST` e `REDIS_PORT`). Em desenvolvimento, o frontend também lê
+`API_INTERNAL_URL` (endereço da API para o servidor Next; padrão
+`NEXT_PUBLIC_API_URL` ou `http://localhost:3333`).
 
 Testes do backend:
 
 ```bash
 cd backend && npm test
+
+# isolamento entre barbearias, contra Postgres e Redis reais (use um banco
+# de teste; o teste cria e apaga as próprias barbearias)
+cd backend && npm run test:e2e -- tenant-isolation
 ```

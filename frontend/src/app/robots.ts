@@ -8,7 +8,8 @@ export default function robots(): MetadataRoute.Robots {
       userAgent: '*',
       allow: '/',
       // As áreas logadas não têm nada a fazer no índice de busca.
-      disallow: ['/dashboard/', '/reservas/', '/login'],
+      // Agora em /<slug>/..., uma por barbearia.
+      disallow: ['/*/dashboard', '/*/reservas', '/*/login', '/plataforma'],
     },
     sitemap: `${siteUrl}/sitemap.xml`,
   };

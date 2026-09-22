@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Menu, X } from 'lucide-react';
+import { initials } from '@/lib/format';
 
 const LINKS = [
   { href: '#servicos', label: 'Serviços' },
@@ -14,7 +15,14 @@ const LINKS = [
  * A navegação era `hidden md:flex` sem menu alternativo: no celular — onde
  * está quase todo cliente de barbearia — os links simplesmente não existiam.
  */
-export function LandingHeader() {
+export function LandingHeader({
+  shopName,
+  basePath,
+}: {
+  shopName: string;
+  /** `/<slug>` da barbearia; os links do menu são relativos a ele. */
+  basePath: string;
+}) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -34,15 +42,15 @@ export function LandingHeader() {
   return (
     <header className="fixed inset-x-0 top-0 z-40 border-b border-line/60 bg-surface-0/70 backdrop-blur-xl">
       <div className="mx-auto flex h-18 max-w-6xl items-center justify-between px-4 sm:px-6">
-        <Link href="/" className="flex items-center gap-3">
+        <Link href={basePath} className="flex min-w-0 items-center gap-3">
           <span
-            className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-500 font-display text-base font-black text-surface-0"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500 font-display text-base font-black text-surface-0"
             aria-hidden="true"
           >
-            GB
+            {initials(shopName)}
           </span>
-          <span className="font-display text-lg font-extrabold tracking-tight text-ink">
-            Gerente Barber
+          <span className="truncate font-display text-lg font-extrabold tracking-tight text-ink">
+            {shopName}
           </span>
         </Link>
 
@@ -60,13 +68,13 @@ export function LandingHeader() {
 
         <div className="flex items-center gap-2">
           <Link
-            href="/login"
+            href={`${basePath}/login`}
             className="hidden rounded-xl px-4 py-2.5 text-sm font-semibold text-ink-muted transition-colors hover:text-ink sm:block"
           >
             Entrar
           </Link>
           <Link
-            href="/reservas/nova"
+            href={`${basePath}/reservas/nova`}
             className="rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-bold text-surface-0 transition-colors hover:bg-brand-400"
           >
             Agendar
@@ -120,7 +128,7 @@ export function LandingHeader() {
               ))}
               <li>
                 <Link
-                  href="/login"
+                  href={`${basePath}/login`}
                   className="block rounded-xl px-3 py-3 text-sm font-semibold text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
                 >
                   Entrar na minha conta
@@ -129,7 +137,7 @@ export function LandingHeader() {
             </ul>
 
             <Link
-              href="/reservas/nova"
+              href={`${basePath}/reservas/nova`}
               className="mt-auto rounded-xl bg-brand-500 px-4 py-3.5 text-center text-sm font-bold text-surface-0"
             >
               Agendar horário

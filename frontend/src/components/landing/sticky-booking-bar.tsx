@@ -11,7 +11,7 @@ import { cn } from '@/lib/cn';
  * do topo e o "Agendar agora" já estão visíveis, e três CTAs iguais competindo
  * pelo mesmo espaço viram ruído.
  */
-export function StickyBookingBar() {
+export function StickyBookingBar({ href }: { href: string }) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -30,7 +30,7 @@ export function StickyBookingBar() {
       )}
     >
       <Link
-        href="/reservas/nova"
+        href={href}
         tabIndex={visible ? undefined : -1}
         className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand-500 font-display text-base font-bold text-surface-0 transition-colors hover:bg-brand-400"
       >

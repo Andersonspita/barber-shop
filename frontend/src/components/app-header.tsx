@@ -6,8 +6,11 @@ import { usePathname, useRouter } from 'next/navigation';
 import { LogOut, Menu, Scissors, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { clearSession } from '@/lib/api';
+import { initials } from '@/lib/format';
+import { useShop } from '@/lib/shop-context';
 
 export interface NavItem {
+  /** Caminho dentro da barbearia, sem o slug: `/reservas`. */
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -31,11 +34,15 @@ export function AppHeader({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const shop = useShop();
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Os itens chegam sem o slug; aqui viram links da barbearia aberta.
+  const links = items.map((item) => ({ ...item, href: shop.href(item.href) }));
 
   const handleLogout = () => {
     clearSession();
-    router.push(loginPath);
+    router.push(shop.href(loginPath));
   };
 
   return (
@@ -47,21 +54,21 @@ export function AppHeader({
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500 font-display text-sm font-black text-surface-0"
               aria-hidden="true"
             >
-              GB
+              {initials(shop.name)}
             </span>
             <div className="min-w-0">
               <p className="truncate text-sm font-bold leading-tight text-ink">
-                {area}
+                {shop.name}
               </p>
-              {subtitle && (
-                <p className="truncate text-xs text-ink-subtle">{subtitle}</p>
-              )}
+              <p className="truncate text-xs text-ink-subtle">
+                {[area, subtitle].filter(Boolean).join(' · ')}
+              </p>
             </div>
           </div>
 
           {/* Navegação completa no desktop. */}
           <nav className="hidden items-center gap-1 md:flex">
-            {items.map((item) => (
+            {links.map((item) => (
               <NavLink
                 key={item.href}
                 item={item}
@@ -93,7 +100,7 @@ export function AppHeader({
 
       {menuOpen && (
         <MobileMenu
-          items={items}
+          items={links}
           pathname={pathname}
           onClose={() => setMenuOpen(false)}
           onLogout={handleLogout}

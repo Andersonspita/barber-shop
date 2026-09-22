@@ -27,19 +27,21 @@ const publicSans = Public_Sans({
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'),
+  // Marca da plataforma. Cada barbearia sobrescreve título, descrição e
+  // manifesto no próprio layout (`app/[shop]/layout.tsx`).
   title: {
-    default: 'Gerente Barber — agende seu horário',
+    default: 'Gerente Barber — agendamento online para barbearias',
     template: '%s · Gerente Barber',
   },
   description:
-    'Agende corte e barba na Gerente Barber em poucos toques. Escolha o profissional, o horário e receba a confirmação no WhatsApp.',
+    'Encontre sua barbearia e agende corte e barba em poucos toques, com confirmação e lembrete no WhatsApp.',
   applicationName: 'Gerente Barber',
   manifest: '/manifest.webmanifest',
   openGraph: {
     type: 'website',
     locale: 'pt_BR',
     siteName: 'Gerente Barber',
-    title: 'Gerente Barber — agende seu horário',
+    title: 'Gerente Barber — agendamento online para barbearias',
     description:
       'Corte, barba e cuidado com hora marcada. Escolha o profissional e garanta seu horário em segundos.',
   },

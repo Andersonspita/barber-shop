@@ -40,6 +40,7 @@ import { Field, Textarea } from '@/components/ui/field';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/cn';
+import { useShop } from '@/lib/shop-context';
 
 interface Service {
   id: string;
@@ -758,14 +759,16 @@ function Confirmation({
   appointment: BookedAppointment;
   onNewBooking: () => void;
 }) {
+  const shop = useShop();
+
   const handleAddToCalendar = () => {
     const ics = buildCalendarEvent({
-      title: `${appointment.service.name} — Gerente Barber`,
+      title: `${appointment.service.name} — ${shop.name}`,
       description: `Com ${appointment.barber.name}.`,
       start: new Date(appointment.startTime),
       end: new Date(appointment.endTime),
     });
-    downloadCalendarEvent(ics, 'agendamento-gerente-barber.ics');
+    downloadCalendarEvent(ics, `agendamento-${shop.slug}.ics`);
   };
 
   return (
@@ -802,7 +805,7 @@ function Confirmation({
             <CalendarPlus className="h-4 w-4" aria-hidden="true" />
             Adicionar à agenda
           </Button>
-          <ButtonLink href="/reservas" block>
+          <ButtonLink href={shop.href('/reservas')} block>
             Ver minhas reservas
           </ButtonLink>
         </div>
@@ -819,7 +822,7 @@ function Confirmation({
       <p className="mt-6 text-center text-sm text-ink-subtle">
         Precisa mudar?{' '}
         <Link
-          href="/reservas"
+          href={shop.href('/reservas')}
           className="font-semibold text-ink-muted transition-colors hover:text-brand-400"
         >
           Remarque ou cancele em Minhas reservas

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { SessionUser, api, clearSession, getToken } from './api';
+import { useShop } from './shop-context';
 
 type Guard = 'CLIENT' | 'STAFF' | 'ADMIN';
 
@@ -19,12 +20,15 @@ type Guard = 'CLIENT' | 'STAFF' | 'ADMIN';
  */
 export function useSession(guard: Guard) {
   const router = useRouter();
+  const { href } = useShop();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    const loginPath = guard === 'CLIENT' ? '/login' : '/login?area=profissional';
+    const loginPath = href(
+      guard === 'CLIENT' ? '/login' : '/login?area=profissional',
+    );
 
     void (async () => {
       if (!getToken()) {
@@ -48,24 +52,25 @@ export function useSession(guard: Guard) {
       const isStaff = session.role === 'BARBER' || session.isAdmin;
 
       if (guard === 'CLIENT' && session.role !== 'CLIENT') {
-        router.replace('/dashboard');
+        router.replace(href('/dashboard'));
         return;
       }
       if (guard === 'STAFF' && !isStaff) {
-        router.replace('/reservas');
+        router.replace(href('/reservas'));
         return;
       }
       if (guard === 'ADMIN' && !session.isAdmin) {
-        router.replace('/dashboard');
+        router.replace(href('/dashboard'));
         return;
       }
 
       // Conta criada pelo admin, com senha temporária, precisa trocar antes.
       if (session.mustChangePassword) {
-        const target =
+        const target = href(
           session.role === 'CLIENT'
             ? '/reservas/configuracoes'
-            : '/dashboard/configuracoes';
+            : '/dashboard/configuracoes',
+        );
         if (window.location.pathname !== target) {
           router.replace(`${target}?trocar=1`);
           return;
@@ -79,7 +84,7 @@ export function useSession(guard: Guard) {
     return () => {
       cancelled = true;
     };
-  }, [guard, router]);
+  }, [guard, router, href]);
 
   return { user, ready };
 }

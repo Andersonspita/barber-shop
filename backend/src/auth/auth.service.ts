@@ -121,7 +121,9 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({
       where: { shopId_email: { shopId, email } },
-      include: { shop: { select: { slug: true, whatsappInstance: true } } },
+      include: {
+        shop: { select: { slug: true, name: true, whatsappInstance: true } },
+      },
     });
     if (!user || !user.isActive) return genericResponse;
 
@@ -143,7 +145,7 @@ export class AuthService {
       await this.whatsapp
         .sendText(
           user.phoneNumber,
-          `Recebemos um pedido para redefinir sua senha.\n\n` +
+          `Recebemos um pedido para redefinir sua senha na ${user.shop.name}.\n\n` +
             `Abra este link em até ${RESET_TOKEN_TTL_MINUTES} minutos:\n${link}\n\n` +
             `Se não foi você, ignore esta mensagem.`,
           user.shop.whatsappInstance,

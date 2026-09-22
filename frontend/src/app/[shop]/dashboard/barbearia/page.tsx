@@ -1,7 +1,14 @@
 'use client';
 
 import React, { useCallback, useState } from 'react';
-import { CalendarOff, Plus, Save, Scissors, Trash2 } from 'lucide-react';
+import {
+  CalendarOff,
+  Copy,
+  Plus,
+  Save,
+  Scissors,
+  Trash2,
+} from 'lucide-react';
 import { ApiError, api } from '@/lib/api';
 import { useSession } from '@/lib/use-session';
 import { useAsyncData } from '@/lib/use-async-data';
@@ -16,6 +23,7 @@ import { ConfirmDialog, Modal } from '@/components/ui/modal';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/cn';
+import { useShop } from '@/lib/shop-context';
 
 interface Settings {
   name: string;
@@ -65,7 +73,23 @@ type Tab = 'ajustes' | 'servicos' | 'feriados';
 
 export default function ShopPage() {
   const { user, ready } = useSession('ADMIN');
+  const shop = useShop();
+  const toast = useToast();
   const [tab, setTab] = useState<Tab>('ajustes');
+
+  const publicUrl =
+    typeof window === 'undefined'
+      ? shop.href('/')
+      : `${window.location.origin}${shop.href('/')}`;
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      toast.success('Link copiado', 'Cole no Instagram, no Google e no WhatsApp.');
+    } catch {
+      toast.info('Copie o link', publicUrl);
+    }
+  };
 
   if (!ready || !user) return null;
 
@@ -83,6 +107,28 @@ export default function ShopPage() {
           title="Barbearia"
           description="Dados da casa, regras da agenda, serviços e feriados."
         />
+
+        {/* O link que a barbearia divulga. Com várias barbearias na mesma
+            plataforma, o endereço deixa de ser só o domínio. */}
+        <div className="mb-6 flex flex-col gap-3 rounded-card border border-brand-500/30 bg-brand-500/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-wider text-brand-400">
+              Link de agendamento
+            </p>
+            <a
+              href={shop.href('/')}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block truncate text-sm font-semibold text-ink hover:text-brand-400"
+            >
+              {publicUrl}
+            </a>
+          </div>
+          <Button variant="secondary" size="sm" onClick={copyLink}>
+            <Copy className="h-4 w-4" aria-hidden="true" />
+            Copiar link
+          </Button>
+        </div>
 
         <div
           role="tablist"

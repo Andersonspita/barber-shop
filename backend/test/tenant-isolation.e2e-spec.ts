@@ -3,13 +3,15 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
  * Isolamento entre barbearias, de ponta a ponta, contra Postgres e Redis
  * reais (DATABASE_URL, REDIS_HOST/REDIS_PORT e JWT_SECRET no ambiente).
  *
  * O teste cria as próprias barbearias pela API da plataforma, com slugs
- * únicos por execução, então não depende do seed nem apaga nada da base.
+ * únicos por execução, e apaga tudo delas no fim — não depende do seed nem
+ * toca nos dados das outras barbearias. Ainda assim, rode num banco de teste.
  *
  *   npm run test:e2e -- tenant-isolation
  */
@@ -22,6 +24,7 @@ describe('Isolamento entre barbearias (e2e)', () => {
   const shopA = { slug: `e2e-a-${RUN}`, token: '', adminId: '', serviceId: '' };
   const shopB = { slug: `e2e-b-${RUN}`, token: '', adminId: '', serviceId: '' };
   let shopBId = '';
+  const createdShopIds: string[] = [];
 
   beforeAll(async () => {
     process.env.PLATFORM_ADMIN_KEY = PLATFORM_KEY;
@@ -53,6 +56,7 @@ describe('Isolamento entre barbearias (e2e)', () => {
           adminEmail: 'admin@e2e.com',
         })
         .expect(201);
+      createdShopIds.push(created.body.shop.id as string);
       if (shop === shopB) shopBId = created.body.shop.id as string;
 
       const login = await request(app.getHttpServer())
@@ -76,6 +80,9 @@ describe('Isolamento entre barbearias (e2e)', () => {
   });
 
   afterAll(async () => {
+    if (app && createdShopIds.length > 0) {
+      await removeShops(app.get(PrismaService), createdShopIds);
+    }
     await app?.close();
   });
 
@@ -362,4 +369,23 @@ function nextWeekday(): string {
     date.setUTCDate(date.getUTCDate() + 1);
   }
   return date.toISOString().slice(0, 10);
+}
+
+/** Apaga as barbearias do teste, na ordem que as chaves estrangeiras pedem. */
+async function removeShops(prisma: PrismaService, shopIds: string[]) {
+  const users = { shopId: { in: shopIds } };
+  const barbers = { barber: users };
+  await prisma.$transaction([
+    prisma.review.deleteMany({ where: { appointment: users } }),
+    prisma.waitlistEntry.deleteMany({ where: users }),
+    prisma.appointment.deleteMany({ where: users }),
+    prisma.barberService.deleteMany({ where: barbers }),
+    prisma.workingHours.deleteMany({ where: barbers }),
+    prisma.scheduleBlock.deleteMany({ where: barbers }),
+    prisma.passwordResetToken.deleteMany({ where: { user: users } }),
+    prisma.holiday.deleteMany({ where: users }),
+    prisma.service.deleteMany({ where: users }),
+    prisma.user.deleteMany({ where: users }),
+    prisma.shop.deleteMany({ where: { id: { in: shopIds } } }),
+  ]);
 }
