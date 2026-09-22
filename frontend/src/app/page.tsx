@@ -7,6 +7,7 @@ import {
   Phone,
   Scissors,
   Star,
+  UserRound,
 } from 'lucide-react';
 import {
   FALLBACK_SHOP,
@@ -17,6 +18,7 @@ import {
 } from '@/lib/server-api';
 import { formatBRLCompact, formatDuration, formatPhone } from '@/lib/format';
 import { LandingHeader } from '@/components/landing/landing-header';
+import { StickyBookingBar } from '@/components/landing/sticky-booking-bar';
 import { Avatar } from '@/components/ui/avatar';
 
 // Server Component: o HTML já sai com serviços e equipe dentro, revalidado a
@@ -35,10 +37,15 @@ export default async function LandingPage() {
     ? `https://wa.me/${shop.whatsapp.replace(/\D/g, '')}`
     : null;
 
+  const rating = aggregateRating(barbers);
+  const startingPrice = services.length
+    ? Math.min(...services.map((service) => Number(service.price)))
+    : null;
+
   return (
     <>
       <LandingHeader />
-      <StructuredData shop={shop} services={services} />
+      <StructuredData shop={shop} services={services} rating={rating} />
 
       <main id="conteudo" className="pt-18">
         {/* -------------------------------------------------------- hero */}
@@ -78,13 +85,74 @@ export default async function LandingPage() {
               </a>
             </div>
 
-            {shop.cancellationWindowMinutes > 0 && (
-              <p className="mt-5 text-xs text-ink-subtle">
-                Cancelamento gratuito até{' '}
-                {Math.round(shop.cancellationWindowMinutes / 60)}h antes do
-                horário.
-              </p>
-            )}
+            {/* Prova social logo abaixo do botão, como nas páginas de
+                estabelecimento do Booksy e do Fresha. */}
+            <ul className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-ink-muted">
+              {rating && (
+                <li className="flex items-center gap-1.5">
+                  <Star
+                    className="h-4 w-4 fill-current text-brand-400"
+                    aria-hidden="true"
+                  />
+                  <span className="font-bold tabular text-ink">
+                    {rating.value.toFixed(1).replace('.', ',')}
+                  </span>
+                  <span className="tabular">
+                    ({rating.count}{' '}
+                    {rating.count === 1 ? 'avaliação' : 'avaliações'})
+                  </span>
+                </li>
+              )}
+              {startingPrice !== null && (
+                <li>
+                  Serviços a partir de{' '}
+                  <span className="font-bold tabular text-ink">
+                    {formatBRLCompact(startingPrice)}
+                  </span>
+                </li>
+              )}
+              {shop.cancellationWindowMinutes > 0 && (
+                <li>
+                  Cancelamento grátis até{' '}
+                  {Math.round(shop.cancellationWindowMinutes / 60)}h antes
+                </li>
+              )}
+            </ul>
+          </div>
+        </section>
+
+        {/* ----------------------------------------------- como funciona */}
+        <section
+          aria-labelledby="como-funciona"
+          className="border-t border-line px-4 py-16 sm:px-6"
+        >
+          <div className="mx-auto max-w-6xl">
+            <h2 id="como-funciona" className="sr-only">
+              Como funciona
+            </h2>
+            <ol className="grid gap-4 sm:grid-cols-3">
+              {HOW_IT_WORKS.map((step, index) => (
+                <li
+                  key={step.title}
+                  className="flex items-start gap-4 rounded-card border border-line bg-surface-1 p-5"
+                >
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-500/12 text-brand-400">
+                    <step.icon className="h-5 w-5" aria-hidden="true" />
+                  </span>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-widest text-ink-subtle">
+                      Passo {index + 1}
+                    </p>
+                    <h3 className="mt-0.5 font-display text-base font-bold text-ink">
+                      {step.title}
+                    </h3>
+                    <p className="mt-1 text-sm leading-relaxed text-ink-muted">
+                      {step.description}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ol>
           </div>
         </section>
 
@@ -220,7 +288,7 @@ export default async function LandingPage() {
             <SectionHeading
               eyebrow="Onde estamos"
               title="Venha nos visitar"
-              description="Estas informações eram o que mais faltava para quem chega pela busca do Google."
+              description="Endereço, telefone e redes sociais para você chegar até a gente."
             />
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -276,7 +344,9 @@ export default async function LandingPage() {
         </section>
       </main>
 
-      <footer className="border-t border-line px-4 py-10 sm:px-6">
+      <StickyBookingBar />
+
+      <footer className="border-t border-line px-4 pb-28 pt-10 sm:px-6 md:pb-10">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 text-center sm:flex-row sm:justify-between sm:text-left">
           <p className="text-sm text-ink-subtle">
             © {new Date().getFullYear()} {shop.name}. Todos os direitos
@@ -294,6 +364,41 @@ export default async function LandingPage() {
       </footer>
     </>
   );
+}
+
+const HOW_IT_WORKS = [
+  {
+    icon: Scissors,
+    title: 'Escolha o serviço',
+    description: 'Preço e duração à vista, antes de marcar.',
+  },
+  {
+    icon: UserRound,
+    title: 'Escolha o profissional',
+    description: 'Pelo nome e pela foto — ou deixe com quem estiver livre.',
+  },
+  {
+    icon: MessageCircle,
+    title: 'Confirme no WhatsApp',
+    description: 'Você recebe a confirmação e um lembrete antes do horário.',
+  },
+];
+
+/**
+ * Nota geral da casa, ponderada pelo número de avaliações de cada barbeiro —
+ * uma média simples daria o mesmo peso a quem tem 2 e a quem tem 200.
+ */
+function aggregateRating(
+  barbers: PublicBarber[],
+): { value: number; count: number } | null {
+  let sum = 0;
+  let count = 0;
+  for (const barber of barbers) {
+    if (barber.rating === null || barber.reviewCount === 0) continue;
+    sum += barber.rating * barber.reviewCount;
+    count += barber.reviewCount;
+  }
+  return count > 0 ? { value: sum / count, count } : null;
 }
 
 function SectionHeading({
@@ -359,9 +464,11 @@ function InfoCard({
 function StructuredData({
   shop,
   services,
+  rating,
 }: {
   shop: PublicShop;
   services: PublicService[];
+  rating: { value: number; count: number } | null;
 }) {
   const jsonLd = {
     '@context': 'https://schema.org',
@@ -378,6 +485,13 @@ function StructuredData({
         }
       : undefined,
     hasMap: shop.mapsUrl ?? undefined,
+    aggregateRating: rating
+      ? {
+          '@type': 'AggregateRating',
+          ratingValue: rating.value.toFixed(1),
+          reviewCount: rating.count,
+        }
+      : undefined,
     sameAs: shop.instagram
       ? [`https://instagram.com/${shop.instagram.replace('@', '')}`]
       : undefined,

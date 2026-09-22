@@ -5,22 +5,29 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
   BellRing,
+  CalendarDays,
   CalendarPlus,
   CalendarX2,
+  Check,
   CheckCircle2,
   Clock,
   Scissors,
   User,
+  Users,
 } from 'lucide-react';
 import { ApiError, api } from '@/lib/api';
 import { useSession } from '@/lib/use-session';
 import { useAsyncData } from '@/lib/use-async-data';
 import {
   addDaysISO,
+  dayPeriod,
   formatBRL,
   formatDateLong,
+  formatDayMonth,
   formatDuration,
   formatTime,
+  formatWeekdayShort,
+  parseISODate,
   todayISO,
 } from '@/lib/format';
 import { buildCalendarEvent, downloadCalendarEvent } from '@/lib/calendar';
@@ -28,7 +35,8 @@ import { CLIENT_NAV } from '@/lib/nav';
 import { AppHeader, PageHeading } from '@/components/app-header';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Field, Select, Textarea } from '@/components/ui/field';
+import { Avatar } from '@/components/ui/avatar';
+import { Field, Textarea } from '@/components/ui/field';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/cn';
@@ -202,17 +210,28 @@ function NewBookingPage() {
         items={CLIENT_NAV}
       />
 
-      <main id="conteudo" className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+      <main
+        id="conteudo"
+        className="mx-auto w-full max-w-6xl px-4 pb-32 pt-8 sm:px-6 lg:pb-8"
+      >
         <PageHeading
           title="Reserve sua cadeira"
           description="Escolha o serviço, quem vai te atender e o melhor horário."
         />
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-          <div className="space-y-6">
+        {/* `grid-cols-1` e `min-w-0`: sem eles as fitas roláveis de
+            profissional e de dia esticam a coluna e a página inteira
+            ganha rolagem horizontal. */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="min-w-0 space-y-6">
             {/* --------------------------------------------------- serviço */}
             <Card className="p-5 sm:p-6">
-              <StepTitle number={1} icon={Scissors} label="Serviço" />
+              <StepTitle
+                number={1}
+                icon={Scissors}
+                label="Serviço"
+                done={Boolean(service)}
+              />
 
               {catalogLoading ? (
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -262,52 +281,56 @@ function NewBookingPage() {
               )}
             </Card>
 
-            {/* -------------------------------------- profissional e data */}
+            {/* ------------------------------------------- profissional */}
             <Card className="p-5 sm:p-6">
-              <StepTitle number={2} icon={User} label="Profissional e dia" />
+              <StepTitle
+                number={2}
+                icon={User}
+                label="Profissional"
+                done={!catalogLoading}
+              />
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Profissional">
-                  {(props) => (
-                    <Select
-                      {...props}
-                      value={barberId}
-                      onChange={(e) => {
-                        setBarberId(e.target.value);
-                        setSelected(null);
-                        setWaitlisted(false);
-                      }}
-                    >
-                      <option value="">Qualquer um disponível</option>
-                      {barbers.map((barber) => (
-                        <option key={barber.id} value={barber.id}>
-                          {barber.name}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                </Field>
+              {/* Rosto no lugar de um <select>: nos apps de agendamento
+                  (Booksy, Fresha, Trinks) o cliente escolhe o barbeiro
+                  pela foto, não pelo nome numa lista. */}
+              {catalogLoading ? (
+                <div className="flex gap-3">
+                  {[0, 1, 2, 3].map((index) => (
+                    <Skeleton key={index} className="h-28 w-24 shrink-0" />
+                  ))}
+                </div>
+              ) : (
+                <BarberPicker
+                  barbers={barbers}
+                  value={barberId}
+                  onChange={(id) => {
+                    setBarberId(id);
+                    setSelected(null);
+                    setWaitlisted(false);
+                  }}
+                />
+              )}
+            </Card>
 
-                <Field label="Data">
-                  {(props) => (
-                    <input
-                      {...props}
-                      type="date"
-                      value={date}
-                      min={todayISO()}
-                      max={addDaysISO(todayISO(), 60)}
-                      onChange={(e) => {
-                        setDate(e.target.value);
-                        setSelected(null);
-                        setWaitlisted(false);
-                      }}
-                      className="h-12 w-full rounded-xl border border-line-strong bg-surface-2 px-4 text-sm text-ink transition-colors focus:border-brand-500"
-                    />
-                  )}
-                </Field>
-              </div>
+            {/* ---------------------------------------------------- dia */}
+            <Card className="p-5 sm:p-6">
+              <StepTitle
+                number={3}
+                icon={CalendarDays}
+                label="Dia"
+                done={Boolean(date)}
+              />
 
-              <div className="mt-4">
+              <DateStrip
+                value={date}
+                onChange={(next) => {
+                  setDate(next);
+                  setSelected(null);
+                  setWaitlisted(false);
+                }}
+              />
+
+              <div className="mt-5">
                 <Field
                   label="Observação para o barbeiro"
                   hint="Opcional. Ex.: máquina 2 nas laterais."
@@ -329,7 +352,12 @@ function NewBookingPage() {
 
           {/* ---------------------------------------------------- horários */}
           <Card className="flex flex-col p-5 sm:p-6 lg:sticky lg:top-24 lg:self-start">
-            <StepTitle number={3} icon={Clock} label="Horário" />
+            <StepTitle
+              number={4}
+              icon={Clock}
+              label="Horário"
+              done={selected !== null}
+            />
 
             <div className="min-h-56 flex-1">
               {slotsLoading ? (
@@ -351,36 +379,16 @@ function NewBookingPage() {
                   onJoinWaitlist={handleJoinWaitlist}
                 />
               ) : (
-                <div
-                  role="radiogroup"
-                  aria-label="Horários disponíveis"
-                  className="scroll-slim grid max-h-72 grid-cols-3 gap-2 overflow-y-auto pr-1"
-                >
-                  {slots.map((slot) => {
-                    const isSelected = selected?.dateTime === slot.dateTime;
-                    return (
-                      <button
-                        key={slot.dateTime}
-                        type="button"
-                        role="radio"
-                        aria-checked={isSelected}
-                        onClick={() => setSelected(slot)}
-                        className={cn(
-                          'h-11 rounded-xl text-sm font-bold tabular transition-colors',
-                          isSelected
-                            ? 'bg-brand-500 text-surface-0'
-                            : 'border border-line bg-surface-2 text-ink hover:border-brand-500/60 hover:text-brand-400',
-                        )}
-                      >
-                        {slot.time}
-                      </button>
-                    );
-                  })}
-                </div>
+                <SlotGrid
+                  slots={slots}
+                  selected={selected}
+                  onSelect={setSelected}
+                />
               )}
             </div>
 
-            <div className="mt-5 border-t border-line pt-5">
+            {/* No celular o resumo e o botão ficam na barra fixa de baixo. */}
+            <div className="mt-5 hidden border-t border-line pt-5 lg:block">
               {service && selected && (
                 <dl className="mb-4 space-y-1.5 text-sm">
                   <div className="flex justify-between gap-3">
@@ -415,6 +423,41 @@ function NewBookingPage() {
           </Card>
         </div>
       </main>
+
+      {/* Barra fixa no celular, como no checkout dos apps do setor: o botão
+          de confirmar ficava abaixo da grade, a várias rolagens de distância. */}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface-1/95 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-md lg:hidden">
+        <div className="mx-auto flex max-w-xl items-center gap-3">
+          <div className="min-w-0 flex-1">
+            {service ? (
+              <>
+                <p className="truncate text-sm font-semibold text-ink">
+                  {service.name}
+                </p>
+                <p className="truncate text-xs tabular text-ink-muted">
+                  {selected
+                    ? `${formatDateShortLabel(date)} · ${selected.time} · `
+                    : `${formatDuration(service.durationMinutes)} · `}
+                  <span className="font-bold text-brand-400">
+                    {formatBRL(service.price)}
+                  </span>
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-ink-muted">Escolha um serviço</p>
+            )}
+          </div>
+          <Button
+            size="lg"
+            loading={booking}
+            disabled={!selected || slotsLoading}
+            onClick={handleBook}
+            className="shrink-0"
+          >
+            {selected ? 'Confirmar' : 'Escolha o horário'}
+          </Button>
+        </div>
+      </div>
     </>
   );
 }
@@ -423,22 +466,243 @@ function StepTitle({
   number,
   icon: Icon,
   label,
+  done = false,
 }: {
   number: number;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
+  done?: boolean;
 }) {
   return (
     <h2 className="mb-4 flex items-center gap-2.5 text-sm font-bold uppercase tracking-wider text-ink-muted">
       <span
-        className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-500 text-xs font-black text-surface-0"
+        className={cn(
+          'flex h-6 w-6 items-center justify-center rounded-full text-xs font-black transition-colors',
+          done
+            ? 'bg-success text-surface-0'
+            : 'bg-brand-500 text-surface-0',
+        )}
         aria-hidden="true"
       >
-        {number}
+        {done ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : number}
       </span>
       <Icon className="h-4 w-4 text-brand-400" aria-hidden="true" />
       {label}
     </h2>
+  );
+}
+
+/** "Seg, 22/09" — cabe na barra fixa do celular. */
+function formatDateShortLabel(isoDate: string): string {
+  const day = parseISODate(isoDate);
+  const weekday = formatWeekdayShort(day);
+  return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)}, ${formatDayMonth(day)}`;
+}
+
+function BarberPicker({
+  barbers,
+  value,
+  onChange,
+}: {
+  barbers: Barber[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const options = [
+    { id: '', name: 'Qualquer um', photoUrl: null, hint: 'Primeiro livre' },
+    ...barbers.map((barber) => ({ ...barber, hint: undefined })),
+  ];
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Profissional"
+      className="scroll-slim -mx-1 flex gap-3 overflow-x-auto px-1 pb-2"
+    >
+      {options.map((option) => {
+        const active = value === option.id;
+        return (
+          <button
+            key={option.id || 'any'}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(option.id)}
+            className={cn(
+              'flex w-28 shrink-0 flex-col items-center gap-2 rounded-xl border p-3 text-center transition-colors',
+              active
+                ? 'border-brand-500 bg-brand-500/10'
+                : 'border-line bg-surface-2 hover:border-line-strong',
+            )}
+          >
+            <span
+              className={cn(
+                'relative h-14 w-14 overflow-hidden rounded-full ring-2 transition-colors',
+                active ? 'ring-brand-500' : 'ring-transparent',
+              )}
+            >
+              {option.id ? (
+                <Avatar
+                  name={option.name}
+                  photoUrl={option.photoUrl}
+                  size="fill"
+                />
+              ) : (
+                <span className="flex h-full w-full items-center justify-center bg-surface-3 text-brand-400">
+                  <Users className="h-6 w-6" aria-hidden="true" />
+                </span>
+              )}
+            </span>
+            <span className="w-full truncate text-xs font-semibold text-ink">
+              {option.id ? option.name.split(' ')[0] : option.name}
+            </span>
+            {option.hint && (
+              <span className="-mt-1.5 text-[11px] text-ink-subtle">
+                {option.hint}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const STRIP_DAYS = 14;
+const MAX_ADVANCE_DAYS = 60;
+
+/**
+ * Fita com as próximas duas semanas, no lugar do seletor de data nativo:
+ * um toque por dia, com o dia da semana à vista. Datas mais distantes
+ * continuam acessíveis pelo "Outra data".
+ */
+function DateStrip({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (isoDate: string) => void;
+}) {
+  const today = todayISO();
+  const days = Array.from({ length: STRIP_DAYS }, (_, index) =>
+    addDaysISO(today, index),
+  );
+  const outsideStrip = !days.includes(value);
+
+  return (
+    <div>
+      <div
+        role="radiogroup"
+        aria-label="Dia"
+        className="scroll-slim -mx-1 flex gap-2 overflow-x-auto px-1 pb-2"
+      >
+        {days.map((day, index) => {
+          const active = value === day;
+          const asDate = parseISODate(day);
+          return (
+            <button
+              key={day}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              aria-label={formatDateLong(asDate)}
+              onClick={() => onChange(day)}
+              className={cn(
+                'flex w-16 shrink-0 flex-col items-center rounded-xl border py-2.5 transition-colors',
+                active
+                  ? 'border-brand-500 bg-brand-500 text-surface-0'
+                  : 'border-line bg-surface-2 text-ink hover:border-line-strong',
+              )}
+            >
+              <span
+                className={cn(
+                  'text-[11px] font-bold uppercase tracking-wider',
+                  active ? 'text-surface-0/80' : 'text-ink-subtle',
+                )}
+              >
+                {index === 0 ? 'Hoje' : formatWeekdayShort(asDate)}
+              </span>
+              <span className="font-display text-xl font-extrabold tabular">
+                {asDate.getDate()}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <label className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-ink-muted">
+        Outra data:
+        <input
+          type="date"
+          value={outsideStrip ? value : ''}
+          min={today}
+          max={addDaysISO(today, MAX_ADVANCE_DAYS)}
+          onChange={(e) => e.target.value && onChange(e.target.value)}
+          className={cn(
+            'h-9 rounded-lg border bg-surface-2 px-2 text-xs text-ink transition-colors focus:border-brand-500',
+            outsideStrip ? 'border-brand-500' : 'border-line-strong',
+          )}
+        />
+      </label>
+    </div>
+  );
+}
+
+/** Horários agrupados por período, como nas grades do Booksy e do Fresha. */
+function SlotGrid({
+  slots,
+  selected,
+  onSelect,
+}: {
+  slots: Slot[];
+  selected: Slot | null;
+  onSelect: (slot: Slot) => void;
+}) {
+  const groups = new Map<string, Slot[]>();
+  for (const slot of slots) {
+    const period = dayPeriod(slot.time);
+    groups.set(period, [...(groups.get(period) ?? []), slot]);
+  }
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Horários disponíveis"
+      className="scroll-slim max-h-[26rem] space-y-4 overflow-y-auto pr-1"
+    >
+      {[...groups].map(([period, items]) => (
+        <div key={period}>
+          <p className="mb-2 flex items-center justify-between text-xs font-bold uppercase tracking-wider text-ink-subtle">
+            {period}
+            <span className="font-semibold normal-case tracking-normal">
+              {items.length} {items.length === 1 ? 'horário' : 'horários'}
+            </span>
+          </p>
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-3">
+            {items.map((slot) => {
+              const isSelected = selected?.dateTime === slot.dateTime;
+              return (
+                <button
+                  key={slot.dateTime}
+                  type="button"
+                  role="radio"
+                  aria-checked={isSelected}
+                  onClick={() => onSelect(slot)}
+                  className={cn(
+                    'h-11 rounded-xl text-sm font-bold tabular transition-colors',
+                    isSelected
+                      ? 'bg-brand-500 text-surface-0'
+                      : 'border border-line bg-surface-2 text-ink hover:border-brand-500/60 hover:text-brand-400',
+                  )}
+                >
+                  {slot.time}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

@@ -6,6 +6,8 @@ const SIZES = {
   md: 'h-12 w-12 text-sm',
   lg: 'h-16 w-16 text-lg',
   xl: 'h-full w-full text-4xl',
+  /** Ocupa o contêiner, com iniciais em tamanho de miniatura. */
+  fill: 'h-full w-full text-lg',
 } as const;
 
 /**

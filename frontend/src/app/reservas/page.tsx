@@ -5,6 +5,7 @@ import {
   CalendarPlus,
   CalendarRange,
   Clock,
+  RotateCcw,
   Scissors,
   Star,
   User,
@@ -19,6 +20,7 @@ import {
   formatDateLong,
   formatDuration,
   formatTime,
+  relativeDayLabel,
   todayISO,
 } from '@/lib/format';
 import { AppHeader, PageHeading } from '@/components/app-header';
@@ -193,10 +195,11 @@ export default function MyBookingsPage() {
           />
         ) : (
           <ul className="space-y-3">
-            {items.map((appointment) => (
+            {items.map((appointment, index) => (
               <li key={appointment.id}>
                 <AppointmentCard
                   appointment={appointment}
+                  highlight={range === 'upcoming' && index === 0}
                   onCancel={() => setCancelling(appointment)}
                   onReschedule={() => setRescheduling(appointment)}
                   onReview={() => setReviewing(appointment)}
@@ -249,11 +252,14 @@ export default function MyBookingsPage() {
 
 function AppointmentCard({
   appointment,
+  highlight = false,
   onCancel,
   onReschedule,
   onReview,
 }: {
   appointment: Appointment;
+  /** O próximo horário ganha destaque, como o cartão "Próximo" dos apps. */
+  highlight?: boolean;
   onCancel: () => void;
   onReschedule: () => void;
   onReview: () => void;
@@ -261,18 +267,38 @@ function AppointmentCard({
   const status = STATUS[appointment.status];
   const isScheduled = appointment.status === 'SCHEDULED';
   const canReview = appointment.status === 'COMPLETED';
+  // Refazer o último corte em um toque: é o atalho de recompra que Booksy e
+  // Fresha põem em todo item do histórico.
+  const rebookHref = `/reservas/nova?serviceId=${appointment.service.id}&barberId=${appointment.barber.id}`;
 
   return (
     <Card
       className={cn(
         'relative overflow-hidden p-5',
         !isScheduled && 'opacity-80',
+        highlight && 'border-brand-500/50 bg-brand-500/[0.04]',
       )}
     >
+      {highlight && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 w-1 bg-brand-500"
+        />
+      )}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
+          {highlight && (
+            <p className="mb-2 text-xs font-bold uppercase tracking-widest text-brand-400">
+              Seu próximo horário
+            </p>
+          )}
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <Badge tone={status.tone}>{status.label}</Badge>
+            {isScheduled && (
+              <Badge tone="neutral">
+                {relativeDayLabel(appointment.startTime)}
+              </Badge>
+            )}
             <span className="text-xs font-semibold tabular text-ink-muted">
               {formatDateLong(appointment.startTime)} ·{' '}
               {formatTime(appointment.startTime)}
@@ -332,6 +358,12 @@ function AppointmentCard({
                 <Star className="h-4 w-4" aria-hidden="true" />
                 Avaliar
               </Button>
+            )}
+            {!isScheduled && (
+              <ButtonLink href={rebookHref} variant="secondary" size="sm">
+                <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                Agendar de novo
+              </ButtonLink>
             )}
           </div>
         </div>
