@@ -33,6 +33,7 @@ import { SkeletonList } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/cn';
 import { RescheduleForm } from '@/components/reschedule-form';
+import { useShop } from '@/lib/shop-context';
 
 interface Appointment {
   id: string;
@@ -61,6 +62,7 @@ const STATUS: Record<
 export default function MyBookingsPage() {
   const { ready } = useSession('CLIENT');
   const toast = useToast();
+  const shop = useShop();
 
   const [range, setRange] = useState<Range>('upcoming');
 
@@ -127,7 +129,7 @@ export default function MyBookingsPage() {
           title="Suas reservas"
           description="Acompanhe, remarque ou cancele seus horários."
           actions={
-            <ButtonLink href="/reservas/nova">
+            <ButtonLink href={shop.href('/reservas/nova')}>
               <CalendarPlus className="h-4 w-4" aria-hidden="true" />
               Novo agendamento
             </ButtonLink>
@@ -189,7 +191,9 @@ export default function MyBookingsPage() {
             }
             action={
               range === 'upcoming' ? (
-                <ButtonLink href="/reservas/nova">Agendar agora</ButtonLink>
+                <ButtonLink href={shop.href('/reservas/nova')}>
+                  Agendar agora
+                </ButtonLink>
               ) : undefined
             }
           />
@@ -267,9 +271,12 @@ function AppointmentCard({
   const status = STATUS[appointment.status];
   const isScheduled = appointment.status === 'SCHEDULED';
   const canReview = appointment.status === 'COMPLETED';
+  const shop = useShop();
   // Refazer o último corte em um toque: é o atalho de recompra que Booksy e
   // Fresha põem em todo item do histórico.
-  const rebookHref = `/reservas/nova?serviceId=${appointment.service.id}&barberId=${appointment.barber.id}`;
+  const rebookHref = shop.href(
+    `/reservas/nova?serviceId=${appointment.service.id}&barberId=${appointment.barber.id}`,
+  );
 
   return (
     <Card

@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  NotFoundException,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -13,6 +14,7 @@ import {
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminOnly } from '../common/roles.guard';
+import { ShopId } from '../common/shop-context';
 import { generateTemporaryPassword } from '../common/password.util';
 import {
   CreateBarberDto,
@@ -40,9 +42,9 @@ export class AdminBarbersController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Get()
-  async list() {
+  async list(@ShopId() shopId: string) {
     return this.prisma.user.findMany({
-      where: { role: 'BARBER' },
+      where: { shopId, role: 'BARBER' },
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       select: {
         ...BARBER_FIELDS,
@@ -57,12 +59,13 @@ export class AdminBarbersController {
    * sem troca obrigatória.
    */
   @Post()
-  async create(@Body() body: CreateBarberDto) {
-    await this.assertEmailAvailable(body.email);
+  async create(@ShopId() shopId: string, @Body() body: CreateBarberDto) {
+    await this.assertEmailAvailable(shopId, body.email);
 
     const temporaryPassword = generateTemporaryPassword();
     const barber = await this.prisma.user.create({
       data: {
+        shopId,
         name: body.name.trim(),
         email: body.email.trim().toLowerCase(),
         phoneNumber: body.phoneNumber?.trim() || null,
@@ -96,10 +99,12 @@ export class AdminBarbersController {
 
   @Put(':id')
   async update(
+    @ShopId() shopId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: UpdateBarberDto,
   ) {
-    await this.assertEmailAvailable(body.email, id);
+    await this.assertOwned(shopId, id);
+    await this.assertEmailAvailable(shopId, body.email, id);
 
     return this.prisma.user.update({
       where: { id },
@@ -123,7 +128,11 @@ export class AdminBarbersController {
    * landing page.
    */
   @Delete(':id')
-  async deactivate(@Param('id', ParseUUIDPipe) id: string) {
+  async deactivate(
+    @ShopId() shopId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.assertOwned(shopId, id);
     const upcoming = await this.prisma.appointment.count({
       where: { barberId: id, status: 'SCHEDULED', startTime: { gte: new Date() } },
     });
@@ -144,7 +153,11 @@ export class AdminBarbersController {
   }
 
   @Patch(':id/reactivate')
-  async reactivate(@Param('id', ParseUUIDPipe) id: string) {
+  async reactivate(
+    @ShopId() shopId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.assertOwned(shopId, id);
     return this.prisma.user.update({
       where: { id },
       data: { isActive: true },
@@ -153,7 +166,11 @@ export class AdminBarbersController {
   }
 
   @Post(':id/reset-password')
-  async resetPassword(@Param('id', ParseUUIDPipe) id: string) {
+  async resetPassword(
+    @ShopId() shopId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.assertOwned(shopId, id);
     const temporaryPassword = generateTemporaryPassword();
     await this.prisma.user.update({
       where: { id },
@@ -168,7 +185,11 @@ export class AdminBarbersController {
   // ------------------------------------------------------------- jornada
 
   @Get(':id/working-hours')
-  async getWorkingHours(@Param('id', ParseUUIDPipe) id: string) {
+  async getWorkingHours(
+    @ShopId() shopId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.assertOwned(shopId, id);
     return this.prisma.workingHours.findMany({
       where: { barberId: id },
       orderBy: [{ weekday: 'asc' }, { startMinute: 'asc' }],
@@ -178,9 +199,12 @@ export class AdminBarbersController {
   /** Substitui a jornada inteira: é como a tela edita, semana por semana. */
   @Put(':id/working-hours')
   async replaceWorkingHours(
+    @ShopId() shopId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: ReplaceWorkingHoursDto,
   ) {
+    await this.assertOwned(shopId, id);
+
     for (const shift of body.shifts) {
       if (shift.endMinute <= shift.startMinute) {
         throw new BadRequestException(
@@ -198,13 +222,17 @@ export class AdminBarbersController {
       }),
     ]);
 
-    return this.getWorkingHours(id);
+    return this.getWorkingHours(shopId, id);
   }
 
   // ------------------------------------------------------------- serviços
 
   @Get(':id/services')
-  async getServices(@Param('id', ParseUUIDPipe) id: string) {
+  async getServices(
+    @ShopId() shopId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.assertOwned(shopId, id);
     return this.prisma.barberService.findMany({
       where: { barberId: id },
       include: { service: { select: { id: true, name: true } } },
@@ -214,9 +242,22 @@ export class AdminBarbersController {
   /** Lista vazia devolve o barbeiro ao estado "atende todos os serviços". */
   @Put(':id/services')
   async replaceServices(
+    @ShopId() shopId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: ReplaceBarberServicesDto,
   ) {
+    await this.assertOwned(shopId, id);
+
+    // Vincular um serviço de outra barbearia faria o barbeiro "atender" algo
+    // que não existe na vitrine dele.
+    const serviceIds = [...new Set(body.services.map((s) => s.serviceId))];
+    const owned = await this.prisma.service.count({
+      where: { id: { in: serviceIds }, shopId },
+    });
+    if (owned !== serviceIds.length) {
+      throw new BadRequestException('Serviço não encontrado nesta barbearia.');
+    }
+
     await this.prisma.$transaction([
       this.prisma.barberService.deleteMany({ where: { barberId: id } }),
       this.prisma.barberService.createMany({
@@ -229,12 +270,25 @@ export class AdminBarbersController {
       }),
     ]);
 
-    return this.getServices(id);
+    return this.getServices(shopId, id);
   }
 
-  private async assertEmailAvailable(email: string, exceptId?: string) {
+  /** Barbeiro de outra barbearia responde como inexistente. */
+  private async assertOwned(shopId: string, id: string) {
+    const found = await this.prisma.user.findFirst({
+      where: { id, shopId, role: 'BARBER' },
+      select: { id: true },
+    });
+    if (!found) throw new NotFoundException('Profissional não encontrado.');
+  }
+
+  private async assertEmailAvailable(
+    shopId: string,
+    email: string,
+    exceptId?: string,
+  ) {
     const existing = await this.prisma.user.findUnique({
-      where: { email: email.trim().toLowerCase() },
+      where: { shopId_email: { shopId, email: email.trim().toLowerCase() } },
       select: { id: true },
     });
     if (existing && existing.id !== exceptId) {

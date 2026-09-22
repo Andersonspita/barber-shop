@@ -48,6 +48,7 @@ export class ScheduleBlocksController {
     }
 
     return this.scheduleBlocks.createBlock(
+      req.user.shopId,
       targetBarberId,
       new Date(body.startTime),
       new Date(body.endTime),
@@ -72,6 +73,7 @@ export class ScheduleBlocksController {
     }
 
     return this.scheduleBlocks.getBlocks(
+      req.user.shopId,
       targetBarberId,
       query.start ? new Date(query.start) : undefined,
       query.end ? new Date(query.end) : undefined,
@@ -83,6 +85,11 @@ export class ScheduleBlocksController {
     @Param('id', ParseUUIDPipe) id: string,
     @Request() req: { user: SessionUser },
   ) {
-    return this.scheduleBlocks.deleteBlock(id, req.user.id, req.user.isAdmin);
+    return this.scheduleBlocks.deleteBlock(
+      req.user.shopId,
+      id,
+      req.user.id,
+      req.user.isAdmin,
+    );
   }
 }

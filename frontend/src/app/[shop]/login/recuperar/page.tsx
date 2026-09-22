@@ -8,6 +8,7 @@ import { ApiError, api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';
 import { useToast } from '@/components/ui/toast';
+import { useShop } from '@/lib/shop-context';
 
 /**
  * Recuperação de senha — não existia em lugar nenhum: quem esquecia a senha
@@ -21,6 +22,7 @@ function RecoverForm() {
 }
 
 function RequestStep() {
+  const shop = useShop();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -58,7 +60,7 @@ function RequestStep() {
             para o WhatsApp da conta. Ele vale por 30 minutos.
           </p>
           <Link
-            href="/login"
+            href={shop.href('/login')}
             className="mt-6 inline-block text-sm font-bold text-brand-400 transition-colors hover:text-brand-300"
           >
             Voltar para entrar
@@ -107,6 +109,7 @@ function RequestStep() {
 
 function ResetStep({ token }: { token: string }) {
   const router = useRouter();
+  const shop = useShop();
   const toast = useToast();
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
@@ -130,7 +133,7 @@ function ResetStep({ token }: { token: string }) {
         body: { token, newPass: password },
       });
       toast.success('Senha redefinida', 'Entre com a nova senha.');
-      router.push('/login');
+      router.push(shop.href('/login'));
     } catch (caught) {
       setError(
         caught instanceof ApiError ? caught.message : 'Tente de novo em instantes.',
@@ -200,6 +203,7 @@ function Shell({
   description?: string;
   children: React.ReactNode;
 }) {
+  const shop = useShop();
   return (
     <main
       id="conteudo"
@@ -207,7 +211,7 @@ function Shell({
     >
       <div className="w-full max-w-md">
         <Link
-          href="/login"
+          href={shop.href('/login')}
           className="mb-6 inline-flex items-center gap-2 text-sm font-semibold text-ink-muted transition-colors hover:text-ink"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />

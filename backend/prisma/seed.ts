@@ -17,44 +17,58 @@ const WEEK_SHIFTS = [
   { weekday: 6, startMinute: 9 * 60, endMinute: 14 * 60 },
 ];
 
-async function main() {
-  const passwordHash = await bcrypt.hash('Barbearia123', 10);
-
-  // Limpar tabelas para rodar múltiplas vezes.
-  await prisma.review.deleteMany();
-  await prisma.waitlistEntry.deleteMany();
-  await prisma.appointment.deleteMany();
-  await prisma.barberService.deleteMany();
-  await prisma.workingHours.deleteMany();
-  await prisma.scheduleBlock.deleteMany();
-  await prisma.passwordResetToken.deleteMany();
-  await prisma.service.deleteMany();
-  await prisma.user.deleteMany();
-
-  // A migração já cria a linha de configuração com os padrões, então o
-  // `update` precisa repetir os campos — com `update: {}` o seed não teria
-  // efeito nenhum sobre uma base já migrada.
-  const shopDefaults = {
-    name: 'Gerente Barber',
-    timezone: 'America/Sao_Paulo',
-    addressLine: 'Rua das Tesouras, 120 — Centro',
-    city: 'São Paulo, SP',
-    mapsUrl: 'https://maps.google.com/?q=Rua+das+Tesouras+120',
-    phone: '(11) 3000-0000',
-    whatsapp: '11900000000',
-    instagram: 'gerentebarber',
-    about:
-      'Barbearia de bairro desde 2014. Corte, barba e cuidado sem pressa, com hora marcada.',
+interface ShopSeed {
+  slug: string;
+  settings: {
+    name: string;
+    timezone: string;
+    addressLine: string;
+    city: string;
+    mapsUrl: string;
+    phone: string;
+    whatsapp: string;
+    instagram: string;
+    about: string;
   };
+  services: Array<{
+    name: string;
+    description: string;
+    durationMinutes: number;
+    price: number;
+  }>;
+  barbers: Array<{
+    name: string;
+    email: string;
+    phoneNumber: string;
+    isAdmin?: boolean;
+    commissionRate: number;
+    bio: string;
+    /** Serviços que o barbeiro executa; ausente = todos. */
+    only?: string[];
+  }>;
+}
 
-  await prisma.shopSettings.upsert({
-    where: { id: 'default' },
-    update: shopDefaults,
-    create: { id: 'default', ...shopDefaults },
-  });
-
-  const services = await Promise.all(
-    [
+/**
+ * Duas barbearias, para que o isolamento entre elas possa ser visto na hora:
+ * cada uma com equipe, serviços e preços próprios, e o mesmo cliente
+ * (mesmo e-mail) cadastrado nas duas como contas independentes.
+ */
+const SHOPS: ShopSeed[] = [
+  {
+    slug: 'principal',
+    settings: {
+      name: 'Gerente Barber',
+      timezone: 'America/Sao_Paulo',
+      addressLine: 'Rua das Tesouras, 120 — Centro',
+      city: 'São Paulo, SP',
+      mapsUrl: 'https://maps.google.com/?q=Rua+das+Tesouras+120',
+      phone: '(11) 3000-0000',
+      whatsapp: '11900000000',
+      instagram: 'gerentebarber',
+      about:
+        'Barbearia de bairro desde 2014. Corte, barba e cuidado sem pressa, com hora marcada.',
+    },
+    services: [
       {
         name: 'Corte',
         description:
@@ -83,50 +97,119 @@ async function main() {
         durationMinutes: 30,
         price: 40,
       },
-    ].map((data) => prisma.service.create({ data })),
-  );
-
-  const [joao, maria] = await Promise.all([
-    prisma.user.create({
-      data: {
+    ],
+    barbers: [
+      {
         name: 'João Ferreira',
         email: 'joao@barbearia.com',
-        passwordHash,
         phoneNumber: '11911111111',
-        role: 'BARBER',
         isAdmin: true,
         commissionRate: 0.5,
         bio: 'Especialista em degradê e barba na navalha. Na cadeira desde 2012.',
       },
-    }),
-    prisma.user.create({
-      data: {
+      {
         name: 'Maria Souza',
         email: 'maria@barbearia.com',
-        passwordHash,
         phoneNumber: '11922222222',
-        role: 'BARBER',
         commissionRate: 0.45,
         bio: 'Corte clássico e infantil. Mão leve e conversa boa.',
+        // Maria não faz o combo longo.
+        only: ['Corte', 'Barba', 'Corte infantil'],
       },
-    }),
-  ]);
+    ],
+  },
+  {
+    slug: 'navalha-de-ouro',
+    settings: {
+      name: 'Navalha de Ouro',
+      timezone: 'America/Recife',
+      addressLine: 'Av. Boa Viagem, 900 — Boa Viagem',
+      city: 'Recife, PE',
+      mapsUrl: 'https://maps.google.com/?q=Av+Boa+Viagem+900',
+      phone: '(81) 3000-0000',
+      whatsapp: '81900000000',
+      instagram: 'navalhadeouro',
+      about:
+        'Barbearia clássica à beira-mar. Navalha, toalha quente e um café enquanto espera.',
+    },
+    services: [
+      {
+        name: 'Corte na tesoura',
+        description: 'Corte inteiro na tesoura, com lavagem e finalização.',
+        durationMinutes: 45,
+        price: 60,
+      },
+      {
+        name: 'Barba de navalha',
+        description: 'Barba feita na navalha, com toalha quente e bálsamo.',
+        durationMinutes: 30,
+        price: 40,
+      },
+      {
+        name: 'Pigmentação',
+        description: 'Pigmentação de barba ou cabelo para disfarçar falhas.',
+        durationMinutes: 40,
+        price: 50,
+      },
+    ],
+    barbers: [
+      {
+        name: 'Rafael Lima',
+        email: 'rafael@navalhadeouro.com',
+        phoneNumber: '81911111111',
+        isAdmin: true,
+        commissionRate: 0.5,
+        bio: 'Dono da casa. Tesoura e navalha há 15 anos.',
+      },
+    ],
+  },
+];
 
-  await prisma.workingHours.createMany({
-    data: [joao, maria].flatMap((barber) =>
-      WEEK_SHIFTS.map((shift) => ({ ...shift, barberId: barber.id })),
+async function seedShop(seed: ShopSeed, passwordHash: string) {
+  // A primeira barbearia reaproveita a linha "default" criada pela migração,
+  // para que uma base já existente não ganhe uma barbearia duplicada.
+  const shop = await prisma.shop.upsert({
+    where: { slug: seed.slug },
+    update: seed.settings,
+    create: {
+      ...(seed.slug === 'principal' ? { id: 'default' } : {}),
+      slug: seed.slug,
+      ...seed.settings,
+    },
+  });
+
+  const services = await Promise.all(
+    seed.services.map((data) =>
+      prisma.service.create({ data: { ...data, shopId: shop.id } }),
     ),
-  });
+  );
 
-  // Maria não faz o combo longo; João atende tudo (sem vínculo = faz todos).
-  await prisma.barberService.createMany({
-    data: services
-      .filter((s) => s.name !== 'Corte + Barba')
-      .map((service) => ({ barberId: maria.id, serviceId: service.id })),
-  });
+  const barbers = [];
+  for (const barber of seed.barbers) {
+    const { only, ...data } = barber;
+    const created = await prisma.user.create({
+      data: { ...data, shopId: shop.id, passwordHash, role: 'BARBER' },
+    });
+    barbers.push(created);
 
+    await prisma.workingHours.createMany({
+      data: WEEK_SHIFTS.map((shift) => ({ ...shift, barberId: created.id })),
+    });
+
+    if (only) {
+      await prisma.barberService.createMany({
+        data: services
+          .filter((s) => only.includes(s.name))
+          .map((service) => ({ barberId: created.id, serviceId: service.id })),
+      });
+    }
+  }
+
+  // Mesmo e-mail nas duas barbearias: são contas diferentes, cada uma com a
+  // própria senha e histórico.
   const client = await prisma.user.create({
     data: {
+      shopId: shop.id,
       name: 'Carlos Visitante',
       email: 'cliente@exemplo.com',
       passwordHash,
@@ -136,13 +219,49 @@ async function main() {
     },
   });
 
+  return { shop, services, barbers, client };
+}
+
+async function main() {
+  const passwordHash = await bcrypt.hash('Barbearia123', 10);
+
+  // Limpar tabelas para rodar múltiplas vezes.
+  await prisma.review.deleteMany();
+  await prisma.waitlistEntry.deleteMany();
+  await prisma.appointment.deleteMany();
+  await prisma.barberService.deleteMany();
+  await prisma.workingHours.deleteMany();
+  await prisma.scheduleBlock.deleteMany();
+  await prisma.passwordResetToken.deleteMany();
+  await prisma.holiday.deleteMany();
+  await prisma.service.deleteMany();
+  await prisma.user.deleteMany();
+
+  const rows: Array<Record<string, string>> = [];
+  for (const seed of SHOPS) {
+    const { shop, barbers, client, services } = await seedShop(
+      seed,
+      passwordHash,
+    );
+    for (const barber of barbers) {
+      rows.push({
+        barbearia: `/${shop.slug}`,
+        papel: barber.isAdmin ? 'Admin/Barbeiro' : 'Barbeiro',
+        email: barber.email,
+        senha: 'Barbearia123',
+      });
+    }
+    rows.push({
+      barbearia: `/${shop.slug}`,
+      papel: 'Cliente',
+      email: client.email,
+      senha: 'Barbearia123',
+    });
+    console.log(`${shop.name}: ${services.length} serviços cadastrados.`);
+  }
+
   console.log('Seed concluído.');
-  console.table([
-    { papel: 'Admin/Barbeiro', email: joao.email, senha: 'Barbearia123' },
-    { papel: 'Barbeira', email: maria.email, senha: 'Barbearia123' },
-    { papel: 'Cliente', email: client.email, senha: 'Barbearia123' },
-  ]);
-  console.log(`${services.length} serviços e jornada semanal cadastrados.`);
+  console.table(rows);
 }
 
 main()

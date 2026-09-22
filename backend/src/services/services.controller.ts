@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  NotFoundException,
   Param,
   ParseUUIDPipe,
   Post,
@@ -10,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminOnly } from '../common/roles.guard';
+import { ShopId } from '../common/shop-context';
 import { UpsertServiceDto } from './dto';
 
 @AdminOnly()
@@ -18,17 +20,19 @@ export class ServicesController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Get()
-  async list() {
+  async list(@ShopId() shopId: string) {
     return this.prisma.service.findMany({
+      where: { shopId },
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       include: { _count: { select: { appointments: true } } },
     });
   }
 
   @Post()
-  async create(@Body() body: UpsertServiceDto) {
+  async create(@ShopId() shopId: string, @Body() body: UpsertServiceDto) {
     return this.prisma.service.create({
       data: {
+        shopId,
         name: body.name.trim(),
         description: body.description?.trim() || null,
         durationMinutes: body.durationMinutes,
@@ -40,9 +44,11 @@ export class ServicesController {
 
   @Put(':id')
   async update(
+    @ShopId() shopId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: UpsertServiceDto,
   ) {
+    await this.assertOwned(shopId, id);
     return this.prisma.service.update({
       where: { id },
       data: {
@@ -61,10 +67,23 @@ export class ServicesController {
    * tela de agendamento, e o passado continua auditável.
    */
   @Delete(':id')
-  async deactivate(@Param('id', ParseUUIDPipe) id: string) {
+  async deactivate(
+    @ShopId() shopId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.assertOwned(shopId, id);
     return this.prisma.service.update({
       where: { id },
       data: { isActive: false },
     });
+  }
+
+  /** Serviço de outra barbearia responde como inexistente. */
+  private async assertOwned(shopId: string, id: string) {
+    const found = await this.prisma.service.findFirst({
+      where: { id, shopId },
+      select: { id: true },
+    });
+    if (!found) throw new NotFoundException('Serviço não encontrado.');
   }
 }

@@ -4,7 +4,6 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
 import { formatInTimeZone } from 'date-fns-tz';
 import { PrismaService } from '../prisma/prisma.service';
-import { ShopSettingsService } from '../shop/shop-settings.service';
 import { NotificationsService } from './notifications.service';
 
 export const MAINTENANCE_QUEUE = 'maintenance-queue';
@@ -13,8 +12,9 @@ const GREETING_HOUR = Number(process.env.BIRTHDAY_GREETING_HOUR ?? 9);
 
 /**
  * `birthDate` já era coletado no cadastro e em nenhum momento lido. Este job
- * roda de hora em hora e dispara as felicitações quando bate a hora escolhida
- * no fuso da barbearia — assim continua correto mesmo se o fuso mudar.
+ * roda de hora em hora e, para cada barbearia, dispara as felicitações quando
+ * bate a hora escolhida no fuso dela — barbearias em fusos diferentes recebem
+ * a mensagem na mesma hora local.
  */
 @Injectable()
 export class BirthdayScheduler implements OnModuleInit {
@@ -48,7 +48,6 @@ export class MaintenanceProcessor extends WorkerHost {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly shop: ShopSettingsService,
     private readonly notifications: NotificationsService,
   ) {
     super();
@@ -57,13 +56,29 @@ export class MaintenanceProcessor extends WorkerHost {
   async process(job: Job): Promise<void> {
     if (job.name !== BIRTHDAY_JOB) return;
 
-    const settings = await this.shop.get();
-    const now = new Date();
-    const localHour = Number(formatInTimeZone(now, settings.timezone, 'H'));
+    const shops = await this.prisma.shop.findMany({
+      where: { isActive: true },
+      select: { id: true, timezone: true },
+    });
 
+    const now = new Date();
+    for (const shop of shops) {
+      try {
+        await this.greetShop(shop.id, shop.timezone, now);
+      } catch (error) {
+        // Uma barbearia com fuso inválido não pode impedir as outras.
+        this.logger.error(
+          `Aniversários da barbearia ${shop.id} falharam: ${String(error)}`,
+        );
+      }
+    }
+  }
+
+  private async greetShop(shopId: string, timezone: string, now: Date) {
+    const localHour = Number(formatInTimeZone(now, timezone, 'H'));
     if (localHour !== GREETING_HOUR) return;
 
-    const monthDay = formatInTimeZone(now, settings.timezone, 'MM-dd');
+    const monthDay = formatInTimeZone(now, timezone, 'MM-dd');
 
     // `birthDate` guarda o ano de nascimento, então o filtro é por mês e dia.
     const clients = await this.prisma.$queryRaw<
@@ -71,7 +86,8 @@ export class MaintenanceProcessor extends WorkerHost {
     >`
       SELECT "name", "phoneNumber"
       FROM "User"
-      WHERE "role" = 'CLIENT'
+      WHERE "shopId" = ${shopId}
+        AND "role" = 'CLIENT'
         AND "isActive" = true
         AND "birthDate" IS NOT NULL
         AND "phoneNumber" IS NOT NULL
@@ -79,12 +95,12 @@ export class MaintenanceProcessor extends WorkerHost {
     `;
 
     for (const client of clients) {
-      await this.notifications.birthdayGreeting(client);
+      await this.notifications.birthdayGreeting(shopId, client);
     }
 
     if (clients.length > 0) {
       this.logger.log(
-        `${clients.length} felicitação(ões) de aniversário enfileirada(s).`,
+        `${clients.length} felicitação(ões) de aniversário enfileirada(s) na barbearia ${shopId}.`,
       );
     }
   }

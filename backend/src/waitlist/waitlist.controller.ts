@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  NotFoundException,
   Param,
   ParseUUIDPipe,
   Post,
@@ -47,6 +48,23 @@ export class WaitlistController {
     @Request() req: { user: SessionUser },
   ) {
     const date = dateOnlyToUtcMidnight(parseDateOnly(body.date));
+    const shopId = req.user.shopId;
+
+    // Serviço e barbeiro precisam ser da barbearia do cliente.
+    const [service, barber] = await Promise.all([
+      this.prisma.service.findFirst({
+        where: { id: body.serviceId, shopId, isActive: true },
+        select: { id: true },
+      }),
+      body.barberId
+        ? this.prisma.user.findFirst({
+            where: { id: body.barberId, shopId, role: 'BARBER' },
+            select: { id: true },
+          })
+        : Promise.resolve({ id: null }),
+    ]);
+    if (!service) throw new NotFoundException('Serviço não encontrado.');
+    if (!barber) throw new NotFoundException('Profissional não encontrado.');
 
     return this.prisma.waitlistEntry.upsert({
       where: {
@@ -58,6 +76,7 @@ export class WaitlistController {
       },
       update: { barberId: body.barberId ?? null, notifiedAt: null },
       create: {
+        shopId,
         clientId: req.user.id,
         serviceId: body.serviceId,
         barberId: body.barberId ?? null,

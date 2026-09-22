@@ -49,6 +49,10 @@ services:
       WHATSAPP_COUNTRY_CODE: ${WHATSAPP_COUNTRY_CODE:-55}
       REMINDER_HOURS_BEFORE: ${REMINDER_HOURS_BEFORE:-2}
       BIRTHDAY_GREETING_HOUR: ${BIRTHDAY_GREETING_HOUR:-9}
+      # Multi-tenant: barbearia usada quando a requisição não diz qual é, e a
+      # chave do painel /plataforma (vazia = painel desligado).
+      DEFAULT_SHOP_SLUG: ${DEFAULT_SHOP_SLUG:-}
+      PLATFORM_ADMIN_KEY: ${PLATFORM_ADMIN_KEY:-}
       # O fuso da barbearia fica no banco (configurável na tela de ajustes),
       # não aqui: o motor de agenda não depende mais do relógio do contêiner.
       TZ: UTC
@@ -66,6 +70,10 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     container_name: barbershop-frontend
+    environment:
+      # O servidor Next busca os dados de cada barbearia direto no backend,
+      # pela rede interna — o NEXT_PUBLIC_API_URL vazio só serve ao navegador.
+      API_INTERNAL_URL: http://backend:3333
     depends_on:
       - backend
     restart: unless-stopped

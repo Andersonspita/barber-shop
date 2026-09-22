@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/cn';
+import { initials } from '@/lib/format';
+import { useShop } from '@/lib/shop-context';
 
 interface AuthResponse {
   access_token: string;
@@ -19,6 +21,7 @@ function LoginForm() {
   const params = useSearchParams();
   const router = useRouter();
   const toast = useToast();
+  const shop = useShop();
 
   const isStaffArea = params.get('area') === 'profissional';
   const [mode, setMode] = useState<'login' | 'signup'>('login');
@@ -67,7 +70,7 @@ function LoginForm() {
       }
 
       const isStaff = result.user.role === 'BARBER' || result.user.isAdmin;
-      router.push(isStaff ? '/dashboard' : '/reservas');
+      router.push(shop.href(isStaff ? '/dashboard' : '/reservas'));
     } catch (caught) {
       setError(
         caught instanceof ApiError
@@ -86,7 +89,7 @@ function LoginForm() {
     >
       <div className="w-full max-w-md">
         <Link
-          href="/"
+          href={shop.href('/')}
           className="mb-6 inline-flex items-center gap-2 text-sm font-semibold text-ink-muted transition-colors hover:text-ink"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
@@ -99,10 +102,10 @@ function LoginForm() {
               className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-500 font-display text-xl font-black text-surface-0"
               aria-hidden="true"
             >
-              GB
+              {initials(shop.name)}
             </span>
             <h1 className="font-display text-2xl font-extrabold tracking-tight text-ink">
-              {isStaffArea ? 'Área do profissional' : 'Gerente Barber'}
+              {isStaffArea ? 'Área do profissional' : shop.name}
             </h1>
             <p className="mt-1 text-sm text-ink-muted">
               {isStaffArea
@@ -254,7 +257,7 @@ function LoginForm() {
           {mode === 'login' && (
             <p className="mt-5 text-center">
               <Link
-                href="/login/recuperar"
+                href={shop.href('/login/recuperar')}
                 className="text-sm font-semibold text-ink-muted transition-colors hover:text-brand-400"
               >
                 Esqueci minha senha
@@ -267,7 +270,7 @@ function LoginForm() {
           <p className="mt-5 text-center text-sm text-ink-subtle">
             É da equipe?{' '}
             <Link
-              href="/login?area=profissional"
+              href={shop.href('/login?area=profissional')}
               className="font-semibold text-ink-muted transition-colors hover:text-brand-400"
             >
               Entrar pela área do profissional

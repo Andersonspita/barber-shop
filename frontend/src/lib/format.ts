@@ -91,8 +91,16 @@ export function formatWeekdayShort(value: string | Date): string {
   return WEEKDAY_SHORT.format(asDate(value)).replace('.', '');
 }
 
+/**
+ * Uma data pura (`YYYY-MM-DD`) é lida como dia local, não como meia-noite
+ * UTC: `new Date('2026-09-22')` no Brasil (UTC−3) ainda é dia 21, e a agenda
+ * do dia 22 aparecia como "Segunda-feira, 21 de setembro".
+ */
 function asDate(value: string | Date): Date {
-  return value instanceof Date ? value : new Date(value);
+  if (value instanceof Date) return value;
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? parseISODate(value)
+    : new Date(value);
 }
 
 /** `YYYY-MM-DD` de hoje, no relógio de quem está olhando a tela. */

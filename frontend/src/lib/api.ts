@@ -1,5 +1,25 @@
+/**
+ * Endereço da API visto pelo navegador. Vazio quando o nginx serve frontend e
+ * API no mesmo domínio — aí as chamadas saem relativas à página.
+ */
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3333';
+
+// ------------------------------------------------------------ barbearia
+
+let currentShop: string | null = null;
+
+/**
+ * Barbearia da página aberta, definida pelo `ShopProvider`. Vai no cabeçalho
+ * `X-Shop` de toda chamada e separa as sessões guardadas no navegador.
+ */
+export function setCurrentShop(slug: string | null) {
+  currentShop = slug;
+}
+
+export function getCurrentShop(): string | null {
+  return currentShop;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -31,7 +51,12 @@ export async function api<T>(
 ): Promise<T> {
   const { body, auth = false, query, headers, ...rest } = options;
 
-  const url = new URL(`${API_URL}${path}`);
+  // Com API_URL vazio, `new URL('/services')` lançava erro no navegador: a
+  // base precisa ser a própria página.
+  const url = new URL(
+    `${API_URL}${path}`,
+    typeof window === 'undefined' ? 'http://localhost' : window.location.origin,
+  );
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value !== undefined && value !== null && value !== '') {
       url.searchParams.set(key, String(value));
@@ -39,6 +64,7 @@ export async function api<T>(
   }
 
   const finalHeaders = new Headers(headers);
+  if (currentShop) finalHeaders.set('X-Shop', currentShop);
   if (body !== undefined) {
     finalHeaders.set('Content-Type', 'application/json');
   }
@@ -95,8 +121,17 @@ function extractMessage(payload: unknown, status: number): string {
 const TOKEN_KEY = 'access_token';
 const USER_KEY = 'session_user';
 
+/**
+ * Uma sessão por barbearia: quem é cliente de duas tem duas contas, e entrar
+ * numa não pode derrubar — nem reaproveitar — a sessão da outra.
+ */
+function sessionKey(base: string): string {
+  return currentShop ? `${base}:${currentShop}` : base;
+}
+
 export interface SessionUser {
   id: string;
+  shopId?: string;
   name: string;
   email: string;
   role: 'CLIENT' | 'BARBER' | 'ADMIN';
@@ -107,12 +142,12 @@ export interface SessionUser {
 
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return window.localStorage.getItem(TOKEN_KEY);
+  return window.localStorage.getItem(sessionKey(TOKEN_KEY));
 }
 
 export function getSessionUser(): SessionUser | null {
   if (typeof window === 'undefined') return null;
-  const raw = window.localStorage.getItem(USER_KEY);
+  const raw = window.localStorage.getItem(sessionKey(USER_KEY));
   if (!raw) return null;
   try {
     return JSON.parse(raw) as SessionUser;
@@ -122,16 +157,22 @@ export function getSessionUser(): SessionUser | null {
 }
 
 export function saveSession(token: string, user: SessionUser) {
-  window.localStorage.setItem(TOKEN_KEY, token);
-  window.localStorage.setItem(USER_KEY, JSON.stringify(user));
+  window.localStorage.setItem(sessionKey(TOKEN_KEY), token);
+  window.localStorage.setItem(sessionKey(USER_KEY), JSON.stringify(user));
 }
 
 export function clearSession() {
   if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(TOKEN_KEY);
-  window.localStorage.removeItem(USER_KEY);
-  // Chaves da versão anterior, que guardavam papel e nome soltos.
-  for (const legacy of ['user_role', 'is_admin', 'user_name']) {
+  window.localStorage.removeItem(sessionKey(TOKEN_KEY));
+  window.localStorage.removeItem(sessionKey(USER_KEY));
+  // Chaves de versões anteriores: sessão sem barbearia e papel/nome soltos.
+  for (const legacy of [
+    TOKEN_KEY,
+    USER_KEY,
+    'user_role',
+    'is_admin',
+    'user_name',
+  ]) {
     window.localStorage.removeItem(legacy);
   }
 }

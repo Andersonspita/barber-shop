@@ -1,18 +1,20 @@
 import { Controller, Get } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ShopId } from '../common/shop-context';
 
 /**
  * O que a landing page consome sem autenticação. Tudo aqui é recorte
- * explícito — nenhum campo sensível de usuário sai por estas rotas.
+ * explícito — nenhum campo sensível de usuário sai por estas rotas — e sempre
+ * da barbearia informada no cabeçalho `X-Shop`.
  */
 @Controller()
 export class PublicCatalogController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Get('services')
-  async getServices() {
+  async getServices(@ShopId() shopId: string) {
     return this.prisma.service.findMany({
-      where: { isActive: true },
+      where: { shopId, isActive: true },
       orderBy: { name: 'asc' },
       select: {
         id: true,
@@ -25,39 +27,29 @@ export class PublicCatalogController {
   }
 
   @Get('barbers')
-  async getBarbers() {
+  async getBarbers(@ShopId() shopId: string) {
     const barbers = await this.prisma.user.findMany({
-      where: { role: 'BARBER', isActive: true },
+      where: { shopId, role: 'BARBER', isActive: true },
       orderBy: { name: 'asc' },
       select: { id: true, name: true, photoUrl: true, bio: true },
     });
 
-    const ratings = await this.prisma.review.groupBy({
-      by: ['appointmentId'],
-      _avg: { rating: true },
+    // Antes o agrupamento lia todas as avaliações da base. Agora a consulta
+    // já sai recortada pelos barbeiros desta barbearia.
+    const reviews = await this.prisma.review.findMany({
+      where: {
+        appointment: { shopId, barberId: { in: barbers.map((b) => b.id) } },
+      },
+      select: { rating: true, appointment: { select: { barberId: true } } },
     });
 
-    // O agrupamento por barbeiro precisa passar pelo agendamento, então a
-    // média é montada aqui em vez de num groupBy direto.
-    const appointmentIds = ratings.map((r) => r.appointmentId);
-    const appointments = appointmentIds.length
-      ? await this.prisma.appointment.findMany({
-          where: { id: { in: appointmentIds } },
-          select: { id: true, barberId: true },
-        })
-      : [];
-
     const byBarber = new Map<string, { sum: number; count: number }>();
-    for (const rating of ratings) {
-      const appointment = appointments.find(
-        (a) => a.id === rating.appointmentId,
-      );
-      if (!appointment) continue;
-
-      const bucket = byBarber.get(appointment.barberId) ?? { sum: 0, count: 0 };
-      bucket.sum += rating._avg.rating ?? 0;
+    for (const review of reviews) {
+      const barberId = review.appointment.barberId;
+      const bucket = byBarber.get(barberId) ?? { sum: 0, count: 0 };
+      bucket.sum += review.rating;
       bucket.count += 1;
-      byBarber.set(appointment.barberId, bucket);
+      byBarber.set(barberId, bucket);
     }
 
     return barbers.map((barber) => {

@@ -28,8 +28,14 @@ export class AuthService {
     private readonly whatsapp: WhatsappClient,
   ) {}
 
-  async login(email: string, pass: string) {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+  /**
+   * Login dentro de uma barbearia. O mesmo e-mail pode ter conta em várias,
+   * e cada uma é independente — com senha, histórico e papel próprios.
+   */
+  async login(shopId: string, email: string, pass: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { shopId_email: { shopId, email } },
+    });
 
     // A comparação roda mesmo sem usuário para não vazar, pelo tempo de
     // resposta, quais e-mails existem na base.
@@ -48,15 +54,18 @@ export class AuthService {
     return this.session(user);
   }
 
-  async signup(input: {
-    name: string;
-    email: string;
-    pass: string;
-    phoneNumber: string;
-    birthDate?: string;
-  }) {
+  async signup(
+    shopId: string,
+    input: {
+      name: string;
+      email: string;
+      pass: string;
+      phoneNumber: string;
+      birthDate?: string;
+    },
+  ) {
     const exists = await this.prisma.user.findUnique({
-      where: { email: input.email },
+      where: { shopId_email: { shopId, email: input.email } },
     });
     if (exists) {
       throw new BadRequestException('Este e-mail já está cadastrado.');
@@ -64,6 +73,7 @@ export class AuthService {
 
     const user = await this.prisma.user.create({
       data: {
+        shopId,
         name: input.name.trim(),
         email: input.email,
         passwordHash: await bcrypt.hash(input.pass, SALT_ROUNDS),
@@ -103,13 +113,18 @@ export class AuthService {
    * mesma, exista o e-mail ou não — caso contrário a rota vira um verificador
    * de quais clientes a barbearia tem.
    */
-  async requestPasswordReset(email: string) {
+  async requestPasswordReset(shopId: string, email: string) {
     const genericResponse = {
       message:
         'Se este e-mail estiver cadastrado, enviaremos um link de recuperação por WhatsApp.',
     };
 
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    const user = await this.prisma.user.findUnique({
+      where: { shopId_email: { shopId, email } },
+      include: {
+        shop: { select: { slug: true, name: true, whatsappInstance: true } },
+      },
+    });
     if (!user || !user.isActive) return genericResponse;
 
     const token = randomBytes(32).toString('hex');
@@ -122,15 +137,18 @@ export class AuthService {
       },
     });
 
-    const link = `${this.appUrl}/login/recuperar?token=${token}`;
+    // O link leva à página da barbearia, para que o "entrar" depois da troca
+    // de senha já caia no login certo.
+    const link = `${this.appUrl}/${user.shop.slug}/login/recuperar?token=${token}`;
 
     if (user.phoneNumber) {
       await this.whatsapp
         .sendText(
           user.phoneNumber,
-          `Recebemos um pedido para redefinir sua senha.\n\n` +
+          `Recebemos um pedido para redefinir sua senha na ${user.shop.name}.\n\n` +
             `Abra este link em até ${RESET_TOKEN_TTL_MINUTES} minutos:\n${link}\n\n` +
             `Se não foi você, ignore esta mensagem.`,
+          user.shop.whatsappInstance,
         )
         .catch((error: unknown) => {
           this.logger.error(`Falha ao enviar recuperação: ${String(error)}`);
@@ -190,6 +208,7 @@ export class AuthService {
         isAdmin: true,
         photoUrl: true,
         mustChangePassword: true,
+        shop: { select: { id: true, slug: true, name: true } },
       },
     });
     if (!user) throw new UnauthorizedException();
@@ -223,8 +242,11 @@ export class AuthService {
   }
 
   private session(user: User) {
+    // O shopId no token é só informativo: a sessão é sempre revalidada contra
+    // o banco no JwtStrategy.
     const payload = {
       sub: user.id,
+      shopId: user.shopId,
       email: user.email,
       role: user.role,
       isAdmin: user.isAdmin,
@@ -234,6 +256,7 @@ export class AuthService {
       access_token: this.jwtService.sign(payload),
       user: {
         id: user.id,
+        shopId: user.shopId,
         name: user.name,
         email: user.email,
         role: user.role,
@@ -259,4 +282,5 @@ function parseBirthDate(value?: string): Date | null {
 }
 
 /** Hash descartável de custo equivalente, usado só para igualar o tempo do login. */
-const DUMMY_HASH = '$2b$10$CwTycUXWue0Thq9StjUM0uJ8.z3rEO4Vv4LhVeaKWEV0YXKPKPvhu';
+const DUMMY_HASH =
+  '$2b$10$CwTycUXWue0Thq9StjUM0uJ8.z3rEO4Vv4LhVeaKWEV0YXKPKPvhu';

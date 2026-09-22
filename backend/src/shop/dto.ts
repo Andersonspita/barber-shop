@@ -15,16 +15,32 @@ export class UpdateShopSettingsDto {
   /** Fuso IANA, ex.: `America/Sao_Paulo`. Validado contra o ICU do runtime. */
   @IsOptional() @IsString() @MaxLength(64) timezone?: string;
 
-  @IsOptional() @Type(() => Number) @IsInt() @Min(5) @Max(120)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(5)
+  @Max(120)
   slotIntervalMinutes?: number;
 
-  @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(24 * 60)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(24 * 60)
   minAdvanceMinutes?: number;
 
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(365)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(365)
   maxAdvanceDays?: number;
 
-  @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(7 * 24 * 60)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(7 * 24 * 60)
   cancellationWindowMinutes?: number;
 
   @IsOptional() @IsString() @MaxLength(200) addressLine?: string;

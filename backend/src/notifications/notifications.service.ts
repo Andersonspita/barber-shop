@@ -15,6 +15,8 @@ export interface WhatsappJob {
     | 'reschedule'
     | 'waitlist'
     | 'birthday';
+  /** Define por qual número de WhatsApp a mensagem sai. */
+  shopId: string;
   to: string;
   message: string;
   appointmentId?: string;
@@ -22,6 +24,7 @@ export interface WhatsappJob {
 
 interface AppointmentLike {
   id: string;
+  shopId: string;
   startTime: Date;
   client: { name: string; phoneNumber: string | null } | null;
   barber: { name: string } | null;
@@ -53,6 +56,7 @@ export class NotificationsService {
 
     await this.enqueue({
       kind: 'confirmation',
+      shopId: appointment.shopId,
       to: phone ?? '',
       appointmentId: appointment.id,
       message:
@@ -75,6 +79,7 @@ export class NotificationsService {
     await this.cancelReminder(appointment.id);
     await this.enqueue({
       kind: 'reschedule',
+      shopId: appointment.shopId,
       to: appointment.client?.phoneNumber ?? '',
       appointmentId: appointment.id,
       message:
@@ -93,6 +98,7 @@ export class NotificationsService {
     await this.cancelReminder(appointment.id);
     await this.enqueue({
       kind: 'cancellation',
+      shopId: appointment.shopId,
       to: appointment.client?.phoneNumber ?? '',
       appointmentId: appointment.id,
       message:
@@ -102,18 +108,20 @@ export class NotificationsService {
   }
 
   async waitlistSlotOpened(
+    shopId: string,
     entries: Array<{
       client: { name: string; phoneNumber: string | null };
       service: { name: string };
     }>,
     startTime: Date,
   ) {
-    const settings = await this.shop.get();
+    const settings = await this.shop.get(shopId);
     const when = formatWhen(startTime, settings.timezone);
 
     for (const entry of entries) {
       await this.enqueue({
         kind: 'waitlist',
+        shopId,
         to: entry.client.phoneNumber ?? '',
         message:
           `Oi, ${firstName(entry.client.name)}! Vagou um horário na ${settings.name}.\n\n` +
@@ -124,10 +132,14 @@ export class NotificationsService {
     }
   }
 
-  async birthdayGreeting(client: { name: string; phoneNumber: string | null }) {
-    const settings = await this.shop.get();
+  async birthdayGreeting(
+    shopId: string,
+    client: { name: string; phoneNumber: string | null },
+  ) {
+    const settings = await this.shop.get(shopId);
     await this.enqueue({
       kind: 'birthday',
+      shopId,
       to: client.phoneNumber ?? '',
       message:
         `Parabéns, ${firstName(client.name)}! 🎉\n\n` +
@@ -153,6 +165,7 @@ export class NotificationsService {
     await this.enqueue(
       {
         kind: 'reminder',
+        shopId: appointment.shopId,
         to: appointment.client?.phoneNumber ?? '',
         appointmentId: appointment.id,
         message:
@@ -199,7 +212,7 @@ export class NotificationsService {
   }
 
   private async context(appointment: AppointmentLike) {
-    const settings = await this.shop.get();
+    const settings = await this.shop.get(appointment.shopId);
     return {
       timezone: settings.timezone,
       shopName: settings.name,
