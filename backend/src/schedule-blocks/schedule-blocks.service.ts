@@ -12,7 +12,28 @@ import { PrismaService } from '../prisma/prisma.service';
 export class ScheduleBlocksService {
   constructor(private prisma: PrismaService) {}
 
-  async createBlock(barberId: string, startTime: Date, endTime: Date, reason?: string) {
+  /**
+   * Barbeiro da barbearia de quem está pedindo. É a única porta de entrada
+   * dos bloqueios, que não têm `shopId` próprio: pertencem à barbearia do
+   * barbeiro.
+   */
+  async assertBarberInShop(shopId: string, barberId: string) {
+    const barber = await this.prisma.user.findFirst({
+      where: { id: barberId, shopId, role: 'BARBER' },
+      select: { id: true },
+    });
+    if (!barber) throw new NotFoundException('Profissional não encontrado.');
+  }
+
+  async createBlock(
+    shopId: string,
+    barberId: string,
+    startTime: Date,
+    endTime: Date,
+    reason?: string,
+  ) {
+    await this.assertBarberInShop(shopId, barberId);
+
     if (startTime >= endTime) {
       throw new BadRequestException('O horário de fim deve ser após o horário de início.');
     }
@@ -58,7 +79,9 @@ export class ScheduleBlocksService {
     });
   }
 
-  async getBlocks(barberId: string, start?: Date, end?: Date) {
+  async getBlocks(shopId: string, barberId: string, start?: Date, end?: Date) {
+    await this.assertBarberInShop(shopId, barberId);
+
     // Filtro por sobreposição: um bloqueio que começa antes da janela e
     // termina dentro dela precisa aparecer.
     const where: Prisma.ScheduleBlockWhereInput = {
@@ -74,8 +97,15 @@ export class ScheduleBlocksService {
     });
   }
 
-  async deleteBlock(id: string, barberId: string, isAdmin: boolean) {
-    const block = await this.prisma.scheduleBlock.findUnique({ where: { id } });
+  async deleteBlock(
+    shopId: string,
+    id: string,
+    barberId: string,
+    isAdmin: boolean,
+  ) {
+    const block = await this.prisma.scheduleBlock.findFirst({
+      where: { id, barber: { shopId } },
+    });
     if (!block) throw new NotFoundException('Bloqueio não encontrado.');
 
     if (!isAdmin && block.barberId !== barberId) {

@@ -16,7 +16,9 @@ export class WhatsappClient {
     '',
   );
   private readonly apiKey = process.env.EVOLUTION_API_KEY ?? '';
-  private readonly instance = process.env.EVOLUTION_INSTANCE ?? 'barbearia';
+  /** Instância da plataforma, usada pelas barbearias sem número próprio. */
+  private readonly defaultInstance =
+    process.env.EVOLUTION_INSTANCE ?? 'barbearia';
   private readonly defaultCountryCode =
     process.env.WHATSAPP_COUNTRY_CODE ?? '55';
 
@@ -24,7 +26,16 @@ export class WhatsappClient {
     return Boolean(this.baseUrl && this.apiKey);
   }
 
-  async sendText(rawPhone: string, message: string): Promise<void> {
+  /**
+   * Envia pela instância da barbearia quando ela tem uma conectada; senão,
+   * pela instância padrão da plataforma. A Evolution API atende várias
+   * instâncias com a mesma chave global, uma por número de WhatsApp.
+   */
+  async sendText(
+    rawPhone: string,
+    message: string,
+    instance?: string | null,
+  ): Promise<void> {
     const number = this.normalizePhone(rawPhone);
 
     if (!number) {
@@ -42,7 +53,7 @@ export class WhatsappClient {
     }
 
     const response = await fetch(
-      `${this.baseUrl}/message/sendText/${this.instance}`,
+      `${this.baseUrl}/message/sendText/${encodeURIComponent(instance || this.defaultInstance)}`,
       {
         method: 'POST',
         headers: {

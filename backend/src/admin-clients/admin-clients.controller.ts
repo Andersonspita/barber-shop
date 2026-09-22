@@ -16,6 +16,7 @@ import * as bcrypt from 'bcrypt';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminOnly } from '../common/roles.guard';
+import { ShopId } from '../common/shop-context';
 import { generateTemporaryPassword } from '../common/password.util';
 import { CreateClientDto, ListClientsQueryDto, UpdateClientDto } from './dto';
 
@@ -35,12 +36,13 @@ export class AdminClientsController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Get()
-  async list(@Query() query: ListClientsQueryDto) {
+  async list(@ShopId() shopId: string, @Query() query: ListClientsQueryDto) {
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 50));
     const search = query.search?.trim();
 
     const where: Prisma.UserWhereInput = {
+      shopId,
       role: 'CLIENT',
       ...(search
         ? {
@@ -68,16 +70,17 @@ export class AdminClientsController {
   }
 
   @Post()
-  async create(@Body() body: CreateClientDto) {
+  async create(@ShopId() shopId: string, @Body() body: CreateClientDto) {
     const email =
       body.email?.trim().toLowerCase() ||
       `balcao.${Date.now().toString(36)}@local.invalid`;
 
-    await this.assertEmailAvailable(email);
+    await this.assertEmailAvailable(shopId, email);
 
     const temporaryPassword = generateTemporaryPassword();
     const client = await this.prisma.user.create({
       data: {
+        shopId,
         name: body.name.trim(),
         email,
         phoneNumber: body.phoneNumber?.trim() || null,
@@ -94,10 +97,12 @@ export class AdminClientsController {
 
   @Put(':id')
   async update(
+    @ShopId() shopId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: UpdateClientDto,
   ) {
-    if (body.email) await this.assertEmailAvailable(body.email, id);
+    await this.assertOwned(shopId, id);
+    if (body.email) await this.assertEmailAvailable(shopId, body.email, id);
 
     return this.prisma.user.update({
       where: { id },
@@ -114,7 +119,11 @@ export class AdminClientsController {
 
   /** Desativa em vez de excluir: o histórico sustenta o relatório financeiro. */
   @Delete(':id')
-  async deactivate(@Param('id', ParseUUIDPipe) id: string) {
+  async deactivate(
+    @ShopId() shopId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.assertOwned(shopId, id);
     return this.prisma.user.update({
       where: { id },
       data: { isActive: false },
@@ -123,7 +132,11 @@ export class AdminClientsController {
   }
 
   @Patch(':id/reactivate')
-  async reactivate(@Param('id', ParseUUIDPipe) id: string) {
+  async reactivate(
+    @ShopId() shopId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.assertOwned(shopId, id);
     return this.prisma.user.update({
       where: { id },
       data: { isActive: true },
@@ -132,7 +145,11 @@ export class AdminClientsController {
   }
 
   @Post(':id/reset-password')
-  async resetPassword(@Param('id', ParseUUIDPipe) id: string) {
+  async resetPassword(
+    @ShopId() shopId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.assertOwned(shopId, id);
     const temporaryPassword = generateTemporaryPassword();
     await this.prisma.user.update({
       where: { id },
@@ -145,15 +162,18 @@ export class AdminClientsController {
   }
 
   @Get(':id/history')
-  async history(@Param('id', ParseUUIDPipe) id: string) {
+  async history(
+    @ShopId() shopId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     const client = await this.prisma.user.findFirst({
-      where: { id, role: 'CLIENT' },
+      where: { id, shopId, role: 'CLIENT' },
       select: CLIENT_FIELDS,
     });
     if (!client) throw new NotFoundException('Cliente não encontrado.');
 
     const appointments = await this.prisma.appointment.findMany({
-      where: { clientId: id },
+      where: { clientId: id, shopId },
       include: {
         service: { select: { name: true } },
         barber: { select: { name: true } },
@@ -205,9 +225,22 @@ export class AdminClientsController {
     };
   }
 
-  private async assertEmailAvailable(email: string, exceptId?: string) {
+  /** Cliente de outra barbearia responde como inexistente. */
+  private async assertOwned(shopId: string, id: string) {
+    const found = await this.prisma.user.findFirst({
+      where: { id, shopId, role: 'CLIENT' },
+      select: { id: true },
+    });
+    if (!found) throw new NotFoundException('Cliente não encontrado.');
+  }
+
+  private async assertEmailAvailable(
+    shopId: string,
+    email: string,
+    exceptId?: string,
+  ) {
     const existing = await this.prisma.user.findUnique({
-      where: { email: email.trim().toLowerCase() },
+      where: { shopId_email: { shopId, email: email.trim().toLowerCase() } },
       select: { id: true },
     });
     if (existing && existing.id !== exceptId) {

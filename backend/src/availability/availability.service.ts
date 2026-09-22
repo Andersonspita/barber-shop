@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Service, ShopSettings } from '@prisma/client';
+import { Prisma, Service, Shop } from '@prisma/client';
 import { addMinutes } from 'date-fns';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShopSettingsService } from '../shop/shop-settings.service';
@@ -43,6 +43,10 @@ export interface EffectiveService {
  * Regras que ele aplica, todas configuráveis: fuso da barbearia, jornada por
  * barbeiro e dia da semana, feriados, bloqueios manuais, antecedência mínima,
  * horizonte máximo de agendamento e quais serviços cada barbeiro executa.
+ *
+ * Todo método recebe o `shopId`: serviço, barbeiro e feriado só valem se forem
+ * da barbearia da requisição. Um id de outra barbearia se comporta como um id
+ * que não existe.
  */
 @Injectable()
 export class AvailabilityService {
@@ -52,18 +56,23 @@ export class AvailabilityService {
   ) {}
 
   async getAvailability(
+    shopId: string,
     dateString: string,
     serviceId: string,
     preferredBarberId?: string,
     now = new Date(),
   ): Promise<AvailableSlot[]> {
-    const settings = await this.shop.get();
+    const settings = await this.shop.get(shopId);
     const dateOnly = this.assertDateWithinHorizon(dateString, settings, now);
 
-    if (await this.isHoliday(dateOnly)) return [];
+    if (await this.isHoliday(shopId, dateOnly)) return [];
 
-    const service = await this.findActiveService(serviceId);
-    const barbers = await this.eligibleBarbers(serviceId, preferredBarberId);
+    const service = await this.findActiveService(shopId, serviceId);
+    const barbers = await this.eligibleBarbers(
+      shopId,
+      serviceId,
+      preferredBarberId,
+    );
     if (barbers.length === 0) return [];
 
     const barberIds = barbers.map((b) => b.id);
@@ -142,13 +151,14 @@ export class AvailabilityService {
    * no passado, no feriado ou fora do expediente.
    */
   async assertBookable(
+    shopId: string,
     barberId: string,
     serviceId: string,
     startTime: Date,
     options: { ignoreAppointmentId?: string; skipAdvanceRules?: boolean } = {},
     now = new Date(),
-  ): Promise<{ endTime: Date; settings: ShopSettings }> {
-    const settings = await this.shop.get();
+  ): Promise<{ endTime: Date; settings: Shop }> {
+    const settings = await this.shop.get(shopId);
     const dateOnly = shopDateOnly(startTime, settings.timezone);
 
     if (!options.skipAdvanceRules) {
@@ -164,12 +174,12 @@ export class AvailabilityService {
       }
     }
 
-    if (await this.isHoliday(dateOnly)) {
+    if (await this.isHoliday(shopId, dateOnly)) {
       throw new BadRequestException('A barbearia está fechada nesta data.');
     }
 
-    const service = await this.findActiveService(serviceId);
-    const [barber] = await this.eligibleBarbers(serviceId, barberId);
+    const service = await this.findActiveService(shopId, serviceId);
+    const [barber] = await this.eligibleBarbers(shopId, serviceId, barberId);
     if (!barber) {
       throw new BadRequestException(
         'Este profissional não atende o serviço escolhido.',
@@ -209,10 +219,11 @@ export class AvailabilityService {
 
   /** Preço e duração de um serviço para um barbeiro, aplicando sobrescritas. */
   async effectiveService(
+    shopId: string,
     serviceId: string,
     barberId: string,
   ): Promise<EffectiveService> {
-    const service = await this.findActiveService(serviceId);
+    const service = await this.findActiveService(shopId, serviceId);
     const override = await this.prisma.barberService.findUnique({
       where: { barberId_serviceId: { barberId, serviceId } },
     });
@@ -227,7 +238,7 @@ export class AvailabilityService {
 
   private assertDateWithinHorizon(
     dateString: string,
-    settings: ShopSettings,
+    settings: Shop,
     now: Date,
   ): string {
     const dateOnly = parseDateOnly(dateString);
@@ -245,16 +256,21 @@ export class AvailabilityService {
     return dateOnly;
   }
 
-  private async isHoliday(dateOnly: string): Promise<boolean> {
+  private async isHoliday(shopId: string, dateOnly: string): Promise<boolean> {
     const holiday = await this.prisma.holiday.findUnique({
-      where: { date: dateOnlyToUtcMidnight(dateOnly) },
+      where: {
+        shopId_date: { shopId, date: dateOnlyToUtcMidnight(dateOnly) },
+      },
     });
     return holiday !== null;
   }
 
-  private async findActiveService(serviceId: string): Promise<Service> {
-    const service = await this.prisma.service.findUnique({
-      where: { id: serviceId },
+  private async findActiveService(
+    shopId: string,
+    serviceId: string,
+  ): Promise<Service> {
+    const service = await this.prisma.service.findFirst({
+      where: { id: serviceId, shopId },
     });
     if (!service || !service.isActive) {
       throw new NotFoundException('Serviço não encontrado.');
@@ -267,9 +283,14 @@ export class AvailabilityService {
    * cadastrado é considerado apto a tudo — assim bases criadas antes do
    * vínculo N-N continuam funcionando sem migração de dados.
    */
-  private async eligibleBarbers(serviceId: string, preferredBarberId?: string) {
+  private async eligibleBarbers(
+    shopId: string,
+    serviceId: string,
+    preferredBarberId?: string,
+  ) {
     const barbers = await this.prisma.user.findMany({
       where: {
+        shopId,
         role: 'BARBER',
         isActive: true,
         ...(preferredBarberId ? { id: preferredBarberId } : {}),

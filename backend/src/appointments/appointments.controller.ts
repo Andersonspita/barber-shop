@@ -12,6 +12,7 @@ import {
 import { AppointmentsService, SessionUser } from './appointments.service';
 import { AvailabilityService } from '../availability/availability.service';
 import { AdminOnly, Auth, Roles } from '../common/roles.guard';
+import { ShopId } from '../common/shop-context';
 import {
   AgendaQueryDto,
   AvailabilityQueryDto,
@@ -33,8 +34,12 @@ export class AppointmentsController {
 
   /** Pública: a landing page mostra os horários antes de pedir login. */
   @Get('availability')
-  async getAvailability(@Query() query: AvailabilityQueryDto) {
+  async getAvailability(
+    @ShopId() shopId: string,
+    @Query() query: AvailabilityQueryDto,
+  ) {
     return this.availability.getAvailability(
+      shopId,
       query.date,
       query.serviceId,
       query.barberId,
@@ -45,6 +50,7 @@ export class AppointmentsController {
   @Post()
   async book(@Body() body: BookAppointmentDto, @Request() req: AuthedRequest) {
     const appointment = await this.appointments.book({
+      shopId: req.user.shopId,
       clientId: req.user.id,
       serviceId: body.serviceId,
       startTime: new Date(body.startTime),
@@ -87,14 +93,18 @@ export class AppointmentsController {
 
   @AdminOnly()
   @Get('agenda')
-  async agenda(@Query() query: AgendaQueryDto) {
-    return this.appointments.shopAgenda(query.date, query.barberId);
+  async agenda(@Query() query: AgendaQueryDto, @Request() req: AuthedRequest) {
+    return this.appointments.shopAgenda(
+      req.user.shopId,
+      query.date,
+      query.barberId,
+    );
   }
 
   @Roles('BARBER')
   @Get('metrics/today')
   async todayMetrics(@Request() req: AuthedRequest) {
-    return this.appointments.getTodayMetrics(req.user.id);
+    return this.appointments.getTodayMetrics(req.user.shopId, req.user.id);
   }
 
   @Roles('BARBER')
@@ -106,6 +116,7 @@ export class AppointmentsController {
     // Quem não é admin só enxerga os próprios números.
     const barberId = req.user.isAdmin ? query.barberId : req.user.id;
     return this.appointments.getAdvancedMetrics(
+      req.user.shopId,
       query.startDate,
       query.endDate,
       barberId,

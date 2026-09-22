@@ -5,13 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  AppointmentStatus,
-  Prisma,
-  Role,
-  ShopSettings,
-  User,
-} from '@prisma/client';
+import { AppointmentStatus, Prisma, Role, Shop, User } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { addMinutes, differenceInMinutes } from 'date-fns';
 import { PrismaService } from '../prisma/prisma.service';
@@ -35,6 +29,8 @@ const APPOINTMENT_INCLUDE = {
 
 export interface SessionUser {
   id: string;
+  /** Barbearia da conta. Toda consulta feita em nome desta sessão fica nela. */
+  shopId: string;
   email: string;
   name: string;
   role: Role;
@@ -62,6 +58,7 @@ export class AppointmentsService {
    * horário no mesmo milissegundo.
    */
   async book(params: {
+    shopId: string;
     clientId: string;
     serviceId: string;
     startTime: Date;
@@ -71,6 +68,7 @@ export class AppointmentsService {
     skipAdvanceRules?: boolean;
   }) {
     const {
+      shopId,
       clientId,
       serviceId,
       startTime,
@@ -81,6 +79,7 @@ export class AppointmentsService {
     } = params;
 
     const candidates = await this.resolveCandidates(
+      shopId,
       serviceId,
       startTime,
       preferredBarberId,
@@ -103,6 +102,7 @@ export class AppointmentsService {
 
           return tx.appointment.create({
             data: {
+              shopId,
               clientId,
               barberId: candidate.barberId,
               serviceId,
@@ -156,10 +156,15 @@ export class AppointmentsService {
     }
 
     const clientId = input.clientId
-      ? await this.assertClientExists(input.clientId)
-      : await this.createWalkInClient(input.clientName, input.clientPhone);
+      ? await this.assertClientExists(actor.shopId, input.clientId)
+      : await this.createWalkInClient(
+          actor.shopId,
+          input.clientName,
+          input.clientPhone,
+        );
 
     return this.book({
+      shopId: actor.shopId,
       clientId,
       serviceId: input.serviceId,
       startTime: input.startTime,
@@ -181,13 +186,7 @@ export class AppointmentsService {
     actor: SessionUser,
     preferredBarberId?: string,
   ) {
-    const appointment = await this.prisma.appointment.findUnique({
-      where: { id: appointmentId },
-      include: APPOINTMENT_INCLUDE,
-    });
-    if (!appointment) throw new NotFoundException('Agendamento não encontrado.');
-
-    this.assertCanAct(appointment, actor);
+    const appointment = await this.findOwned(appointmentId, actor);
 
     if (appointment.status !== 'SCHEDULED') {
       throw new BadRequestException(
@@ -197,11 +196,12 @@ export class AppointmentsService {
 
     const isStaff = actor.role === 'BARBER' || actor.isAdmin;
     if (!isStaff) {
-      const settings = await this.shop.get();
+      const settings = await this.shop.get(actor.shopId);
       this.assertWithinCancellationWindow(appointment.startTime, settings);
     }
 
     const candidates = await this.resolveCandidates(
+      actor.shopId,
       appointment.serviceId,
       newStartTime,
       preferredBarberId ?? appointment.barberId,
@@ -257,16 +257,10 @@ export class AppointmentsService {
     actor: SessionUser,
     now = new Date(),
   ) {
-    const appointment = await this.prisma.appointment.findUnique({
-      where: { id: appointmentId },
-      include: APPOINTMENT_INCLUDE,
-    });
-    if (!appointment) throw new NotFoundException('Agendamento não encontrado.');
-
-    this.assertCanAct(appointment, actor);
+    const appointment = await this.findOwned(appointmentId, actor);
 
     const isStaff = actor.role === 'BARBER' || actor.isAdmin;
-    const settings = await this.shop.get();
+    const settings = await this.shop.get(actor.shopId);
 
     if (!isStaff && status !== 'CANCELLED') {
       throw new ForbiddenException('Clientes só podem cancelar agendamentos.');
@@ -312,7 +306,11 @@ export class AppointmentsService {
 
     if (status === 'CANCELLED') {
       await this.notifications.appointmentCancelled(updated);
-      await this.notifyWaitlist(updated.serviceId, updated.startTime);
+      await this.notifyWaitlist(
+        actor.shopId,
+        updated.serviceId,
+        updated.startTime,
+      );
     }
 
     return updated;
@@ -335,7 +333,7 @@ export class AppointmentsService {
       pageSize?: number;
     },
   ) {
-    const settings = await this.shop.get();
+    const settings = await this.shop.get(user.shopId);
     const today = shopToday(settings.timezone);
 
     const from = parseDateOnly(query.from ?? today, 'from');
@@ -346,6 +344,7 @@ export class AppointmentsService {
     const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 50));
 
     const where: Prisma.AppointmentWhereInput = {
+      shopId: user.shopId,
       ...(user.role === 'BARBER'
         ? { barberId: user.id }
         : { clientId: user.id }),
@@ -368,8 +367,8 @@ export class AppointmentsService {
   }
 
   /** Agenda da barbearia inteira, em colunas por barbeiro. Só para admin. */
-  async shopAgenda(dateString?: string, barberId?: string) {
-    const settings = await this.shop.get();
+  async shopAgenda(shopId: string, dateString?: string, barberId?: string) {
+    const settings = await this.shop.get(shopId);
     const date = parseDateOnly(
       dateString ?? shopToday(settings.timezone),
       'date',
@@ -379,6 +378,7 @@ export class AppointmentsService {
     const [barbers, appointments, blocks] = await Promise.all([
       this.prisma.user.findMany({
         where: {
+          shopId,
           role: 'BARBER',
           isActive: true,
           ...(barberId ? { id: barberId } : {}),
@@ -388,6 +388,7 @@ export class AppointmentsService {
       }),
       this.prisma.appointment.findMany({
         where: {
+          shopId,
           startTime: { lt: end },
           endTime: { gt: start },
           ...(barberId ? { barberId } : {}),
@@ -397,6 +398,7 @@ export class AppointmentsService {
       }),
       this.prisma.scheduleBlock.findMany({
         where: {
+          barber: { shopId },
           startTime: { lt: end },
           endTime: { gt: start },
           ...(barberId ? { barberId } : {}),
@@ -418,13 +420,13 @@ export class AppointmentsService {
 
   // ------------------------------------------------------------------ métricas
 
-  async getTodayMetrics(barberId: string) {
-    const settings = await this.shop.get();
+  async getTodayMetrics(shopId: string, barberId: string) {
+    const settings = await this.shop.get(shopId);
     const today = shopToday(settings.timezone);
     const { start, end } = shopRange(today, today, settings.timezone);
 
     const appointments = await this.prisma.appointment.findMany({
-      where: { barberId, startTime: { gte: start, lt: end } },
+      where: { shopId, barberId, startTime: { gte: start, lt: end } },
       select: { status: true, priceCharged: true },
     });
 
@@ -448,11 +450,12 @@ export class AppointmentsService {
   }
 
   async getAdvancedMetrics(
+    shopId: string,
     startDateStr: string,
     endDateStr: string,
     barberId?: string,
   ) {
-    const settings = await this.shop.get();
+    const settings = await this.shop.get(shopId);
     const startDate = parseDateOnly(startDateStr, 'startDate');
     const endDate = parseDateOnly(endDateStr, 'endDate');
 
@@ -466,6 +469,7 @@ export class AppointmentsService {
 
     const appointments = await this.prisma.appointment.findMany({
       where: {
+        shopId,
         startTime: { gte: start, lt: end },
         ...(barberId ? { barberId } : {}),
       },
@@ -546,8 +550,8 @@ export class AppointmentsService {
     rating: number,
     comment?: string,
   ) {
-    const appointment = await this.prisma.appointment.findUnique({
-      where: { id: appointmentId },
+    const appointment = await this.prisma.appointment.findFirst({
+      where: { id: appointmentId, shopId: actor.shopId },
       select: { id: true, clientId: true, status: true },
     });
     if (!appointment) throw new NotFoundException('Agendamento não encontrado.');
@@ -576,6 +580,7 @@ export class AppointmentsService {
    * que o cliente saiba o motivo real da recusa.
    */
   private async resolveCandidates(
+    shopId: string,
     serviceId: string,
     startTime: Date,
     preferredBarberId?: string,
@@ -583,21 +588,27 @@ export class AppointmentsService {
   ): Promise<Array<{ barberId: string; endTime: Date; price: Prisma.Decimal }>> {
     if (preferredBarberId) {
       const { endTime } = await this.availability.assertBookable(
+        shopId,
         preferredBarberId,
         serviceId,
         startTime,
         { skipAdvanceRules },
       );
       const { price } = await this.availability.effectiveService(
+        shopId,
         serviceId,
         preferredBarberId,
       );
       return [{ barberId: preferredBarberId, endTime, price }];
     }
 
-    const settings = await this.shop.get();
+    const settings = await this.shop.get(shopId);
     const dateOnly = shopDateOnly(startTime, settings.timezone);
-    const slots = await this.availability.getAvailability(dateOnly, serviceId);
+    const slots = await this.availability.getAvailability(
+      shopId,
+      dateOnly,
+      serviceId,
+    );
     const slot = slots.find((s) => s.dateTime === startTime.toISOString());
 
     if (!slot || slot.barberIds.length === 0) {
@@ -609,7 +620,7 @@ export class AppointmentsService {
     return Promise.all(
       slot.barberIds.map(async (barberId) => {
         const { durationMinutes, price } =
-          await this.availability.effectiveService(serviceId, barberId);
+          await this.availability.effectiveService(shopId, serviceId, barberId);
         return {
           barberId,
           endTime: addMinutes(startTime, durationMinutes),
@@ -617,6 +628,22 @@ export class AppointmentsService {
         };
       }),
     );
+  }
+
+  /**
+   * Agendamento da barbearia de quem está agindo, e que essa pessoa pode
+   * alterar. Um id de outra barbearia responde como inexistente — confirmar
+   * que ele existe já seria vazar informação.
+   */
+  private async findOwned(appointmentId: string, actor: SessionUser) {
+    const appointment = await this.prisma.appointment.findFirst({
+      where: { id: appointmentId, shopId: actor.shopId },
+      include: APPOINTMENT_INCLUDE,
+    });
+    if (!appointment) throw new NotFoundException('Agendamento não encontrado.');
+
+    this.assertCanAct(appointment, actor);
+    return appointment;
   }
 
   private assertCanAct(
@@ -631,7 +658,7 @@ export class AppointmentsService {
 
   private assertWithinCancellationWindow(
     startTime: Date,
-    settings: ShopSettings,
+    settings: Shop,
     now = new Date(),
   ) {
     const window = settings.cancellationWindowMinutes;
@@ -662,9 +689,12 @@ export class AppointmentsService {
     }[status];
   }
 
-  private async assertClientExists(clientId: string): Promise<string> {
-    const client = await this.prisma.user.findUnique({
-      where: { id: clientId },
+  private async assertClientExists(
+    shopId: string,
+    clientId: string,
+  ): Promise<string> {
+    const client = await this.prisma.user.findFirst({
+      where: { id: clientId, shopId, role: 'CLIENT' },
       select: { id: true },
     });
     if (!client) throw new NotFoundException('Cliente não encontrado.');
@@ -677,6 +707,7 @@ export class AppointmentsService {
    * costuma não ter um para dar.
    */
   private async createWalkInClient(
+    shopId: string,
     name?: string,
     phone?: string,
   ): Promise<string> {
@@ -688,7 +719,7 @@ export class AppointmentsService {
 
     if (phone?.trim()) {
       const existing = await this.prisma.user.findFirst({
-        where: { phoneNumber: phone.trim(), role: 'CLIENT' },
+        where: { shopId, phoneNumber: phone.trim(), role: 'CLIENT' },
         select: { id: true },
       });
       if (existing) return existing.id;
@@ -697,6 +728,7 @@ export class AppointmentsService {
     const suffix = Date.now().toString(36);
     const created = await this.prisma.user.create({
       data: {
+        shopId,
         name: name.trim(),
         email: `balcao.${suffix}@local.invalid`,
         phoneNumber: phone?.trim() || null,
@@ -710,14 +742,18 @@ export class AppointmentsService {
   }
 
   /** Cancelou? Quem estava na fila para aquele dia recebe o aviso. */
-  private async notifyWaitlist(serviceId: string, startTime: Date) {
-    const settings = await this.shop.get();
+  private async notifyWaitlist(
+    shopId: string,
+    serviceId: string,
+    startTime: Date,
+  ) {
+    const settings = await this.shop.get(shopId);
     const date = dateOnlyToUtcMidnight(
       shopDateOnly(startTime, settings.timezone),
     );
 
     const entries = await this.prisma.waitlistEntry.findMany({
-      where: { serviceId, date, notifiedAt: null },
+      where: { shopId, serviceId, date, notifiedAt: null },
       include: {
         client: { select: { name: true, phoneNumber: true } },
         service: { select: { name: true } },
@@ -726,7 +762,7 @@ export class AppointmentsService {
     });
     if (entries.length === 0) return;
 
-    await this.notifications.waitlistSlotOpened(entries, startTime);
+    await this.notifications.waitlistSlotOpened(shopId, entries, startTime);
     await this.prisma.waitlistEntry.updateMany({
       where: { id: { in: entries.map((e) => e.id) } },
       data: { notifiedAt: new Date() },

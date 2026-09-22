@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { BullModule } from '@nestjs/bullmq';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
@@ -16,6 +16,8 @@ import { AdminBarbersModule } from './admin-barbers/admin-barbers.module';
 import { ScheduleBlocksModule } from './schedule-blocks/schedule-blocks.module';
 import { PublicCatalogModule } from './public-catalog/public-catalog.module';
 import { WaitlistModule } from './waitlist/waitlist.module';
+import { PlatformModule } from './platform/platform.module';
+import { ShopResolverMiddleware } from './common/shop-context';
 
 @Module({
   imports: [
@@ -31,6 +33,7 @@ import { WaitlistModule } from './waitlist/waitlist.module';
     ScheduleBlocksModule,
     PublicCatalogModule,
     WaitlistModule,
+    PlatformModule,
     // Teto geral de requisições; o login tem um limite bem mais estreito,
     // declarado na própria rota.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
@@ -44,4 +47,9 @@ import { WaitlistModule } from './waitlist/waitlist.module';
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  /** Toda requisição passa a saber de qual barbearia é, antes dos guards. */
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(ShopResolverMiddleware).forRoutes('*');
+  }
+}

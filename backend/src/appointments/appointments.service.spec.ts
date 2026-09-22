@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { AppointmentsService, SessionUser } from './appointments.service';
 
 const SETTINGS = {
@@ -10,8 +14,11 @@ const SETTINGS = {
   cancellationWindowMinutes: 120,
 };
 
+const SHOP_ID = 'shop-1';
+
 const CLIENT: SessionUser = {
   id: 'client-1',
+  shopId: SHOP_ID,
   email: 'cliente@exemplo.com',
   name: 'Cliente',
   role: 'CLIENT',
@@ -20,6 +27,7 @@ const CLIENT: SessionUser = {
 
 const BARBER: SessionUser = {
   id: 'barber-1',
+  shopId: SHOP_ID,
   email: 'barbeiro@exemplo.com',
   name: 'Barbeiro',
   role: 'BARBER',
@@ -31,6 +39,7 @@ const START = new Date('2026-03-10T18:00:00.000Z');
 function build(appointment: Record<string, unknown> = {}) {
   const stored = {
     id: 'appt-1',
+    shopId: SHOP_ID,
     clientId: CLIENT.id,
     barberId: BARBER.id,
     serviceId: 'service-1',
@@ -44,13 +53,29 @@ function build(appointment: Record<string, unknown> = {}) {
   };
 
   const prisma: Record<string, any> = {
+    /** Agendamento que ocupa o horário, para simular corrida. */
+    conflict: null,
     appointment: {
       findUnique: jest.fn().mockResolvedValue(stored),
       update: jest
         .fn()
         .mockImplementation(({ data }) => ({ ...stored, ...data })),
-      findFirst: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockImplementation(({ data }) => ({ ...stored, ...data })),
+      // A mesma função atende duas consultas: a busca do agendamento (sempre
+      // com `shopId`) e a checagem de conflito de horário (com `status`).
+      findFirst: jest
+        .fn()
+        .mockImplementation(({ where }) =>
+          Promise.resolve(
+            'status' in where
+              ? prisma.conflict
+              : where.id === stored.id && where.shopId === stored.shopId
+                ? stored
+                : null,
+          ),
+        ),
+      create: jest
+        .fn()
+        .mockImplementation(({ data }) => ({ ...stored, ...data })),
     },
     waitlistEntry: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -102,6 +127,7 @@ describe('AppointmentsService', () => {
       const { service, prisma, notifications } = build();
 
       await service.book({
+        shopId: SHOP_ID,
         clientId: CLIENT.id,
         serviceId: 'service-1',
         startTime: START,
@@ -119,6 +145,7 @@ describe('AppointmentsService', () => {
       const { service, prisma } = build();
 
       await service.book({
+        shopId: SHOP_ID,
         clientId: CLIENT.id,
         serviceId: 'service-1',
         startTime: START,
@@ -134,10 +161,11 @@ describe('AppointmentsService', () => {
 
     it('recusa quando o horário foi tomado no meio da transação', async () => {
       const { service, prisma } = build();
-      prisma.appointment.findFirst.mockResolvedValue({ id: 'outro' });
+      prisma.conflict = { id: 'outro' };
 
       await expect(
         service.book({
+          shopId: SHOP_ID,
           clientId: CLIENT.id,
           serviceId: 'service-1',
           startTime: START,
@@ -306,7 +334,7 @@ describe('AppointmentsService', () => {
 
     it('mantém o horário original quando o novo já foi tomado', async () => {
       const { service, prisma } = build();
-      prisma.appointment.findFirst.mockResolvedValue({ id: 'outro' });
+      prisma.conflict = { id: 'outro' };
 
       await expect(
         service.reschedule(
@@ -343,6 +371,64 @@ describe('AppointmentsService', () => {
       await expect(
         done.service.createReview('appt-1', BARBER, 5),
       ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('isolamento entre barbearias', () => {
+    const OTHER_SHOP_ADMIN: SessionUser = {
+      id: 'admin-2',
+      shopId: 'shop-2',
+      email: 'admin@outra.com',
+      name: 'Admin de outra barbearia',
+      role: 'BARBER',
+      isAdmin: true,
+    };
+
+    it('admin de outra barbearia não altera o status do agendamento', async () => {
+      const { service, prisma } = build();
+
+      await expect(
+        service.updateStatus('appt-1', 'CANCELLED', OTHER_SHOP_ADMIN),
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.appointment.update).not.toHaveBeenCalled();
+    });
+
+    it('admin de outra barbearia não remarca o agendamento', async () => {
+      const { service, prisma } = build();
+
+      await expect(
+        service.reschedule(
+          'appt-1',
+          new Date('2026-03-10T19:00:00.000Z'),
+          OTHER_SHOP_ADMIN,
+        ),
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.appointment.update).not.toHaveBeenCalled();
+    });
+
+    it('a reserva é gravada na barbearia informada', async () => {
+      const { service, prisma, availability } = build();
+
+      await service.book({
+        shopId: SHOP_ID,
+        clientId: CLIENT.id,
+        serviceId: 'service-1',
+        startTime: START,
+        preferredBarberId: BARBER.id,
+      });
+
+      expect(availability.assertBookable).toHaveBeenCalledWith(
+        SHOP_ID,
+        BARBER.id,
+        'service-1',
+        START,
+        expect.anything(),
+      );
+      expect(prisma.appointment.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ shopId: SHOP_ID }),
+        }),
+      );
     });
   });
 });

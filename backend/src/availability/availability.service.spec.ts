@@ -3,8 +3,14 @@ import { AvailabilityService } from './availability.service';
 
 const SP = 'America/Sao_Paulo';
 
+const SHOP_ID = 'shop-1';
+
 const SETTINGS = {
-  id: 'default',
+  id: SHOP_ID,
+  slug: 'barbearia',
+  isActive: true,
+  whatsappInstance: null,
+  createdAt: new Date(),
   name: 'Barbearia',
   timezone: SP,
   slotIntervalMinutes: 30,
@@ -23,6 +29,7 @@ const SETTINGS = {
 
 const SERVICE = {
   id: 'service-corte',
+  shopId: SHOP_ID,
   name: 'Corte',
   description: null,
   durationMinutes: 30,
@@ -58,7 +65,7 @@ interface FakeData {
 function build(data: FakeData) {
   const prisma = {
     service: {
-      findUnique: jest
+      findFirst: jest
         .fn()
         .mockResolvedValue(data.service === undefined ? SERVICE : data.service),
     },
@@ -83,12 +90,16 @@ function build(data: FakeData) {
         ],
       ),
     },
-    appointment: { findMany: jest.fn().mockResolvedValue(data.appointments ?? []) },
+    appointment: {
+      findMany: jest.fn().mockResolvedValue(data.appointments ?? []),
+    },
     scheduleBlock: { findMany: jest.fn().mockResolvedValue(data.blocks ?? []) },
     holiday: {
       findUnique: jest
         .fn()
-        .mockResolvedValue(data.holiday ? { id: 'h1', date: new Date() } : null),
+        .mockResolvedValue(
+          data.holiday ? { id: 'h1', date: new Date() } : null,
+        ),
     },
   };
 
@@ -108,6 +119,7 @@ describe('AvailabilityService', () => {
     const { service } = build({});
 
     const slots = await service.getAvailability(
+      SHOP_ID,
       TUESDAY,
       SERVICE.id,
       undefined,
@@ -126,6 +138,7 @@ describe('AvailabilityService', () => {
     // 13:00 UTC = 10:00 em São Paulo, com 30 minutos de antecedência mínima.
     const tenAmLocal = new Date('2026-03-10T13:00:00.000Z');
     const slots = await service.getAvailability(
+      SHOP_ID,
       TUESDAY,
       SERVICE.id,
       undefined,
@@ -140,6 +153,7 @@ describe('AvailabilityService', () => {
 
     // 11:50 local: o slot das 12:00 existe, mas está dentro dos 30 minutos.
     const slots = await service.getAvailability(
+      SHOP_ID,
       TUESDAY,
       SERVICE.id,
       undefined,
@@ -163,6 +177,7 @@ describe('AvailabilityService', () => {
     });
 
     const slots = await service.getAvailability(
+      SHOP_ID,
       TUESDAY,
       SERVICE.id,
       undefined,
@@ -177,6 +192,7 @@ describe('AvailabilityService', () => {
     const { service } = build({ holiday: true });
 
     const slots = await service.getAvailability(
+      SHOP_ID,
       TUESDAY,
       SERVICE.id,
       undefined,
@@ -190,6 +206,7 @@ describe('AvailabilityService', () => {
     const { service } = build({ workingHours: [] });
 
     const slots = await service.getAvailability(
+      SHOP_ID,
       TUESDAY,
       SERVICE.id,
       undefined,
@@ -211,6 +228,7 @@ describe('AvailabilityService', () => {
     });
 
     const slots = await service.getAvailability(
+      SHOP_ID,
       TUESDAY,
       SERVICE.id,
       undefined,
@@ -233,13 +251,19 @@ describe('AvailabilityService', () => {
     });
 
     const slots = await service.getAvailability(
+      SHOP_ID,
       TUESDAY,
       SERVICE.id,
       undefined,
       earlyMorning,
     );
 
-    expect(slots.map((s) => s.time)).toEqual(['09:00', '09:30', '11:00', '11:30']);
+    expect(slots.map((s) => s.time)).toEqual([
+      '09:00',
+      '09:30',
+      '11:00',
+      '11:30',
+    ]);
   });
 
   it('consolida barbeiros diferentes no mesmo horário', async () => {
@@ -262,6 +286,7 @@ describe('AvailabilityService', () => {
     });
 
     const slots = await service.getAvailability(
+      SHOP_ID,
       TUESDAY,
       SERVICE.id,
       undefined,
@@ -296,6 +321,7 @@ describe('AvailabilityService', () => {
     });
 
     const slots = await service.getAvailability(
+      SHOP_ID,
       TUESDAY,
       SERVICE.id,
       undefined,
@@ -310,6 +336,7 @@ describe('AvailabilityService', () => {
 
     await expect(
       service.getAvailability(
+        SHOP_ID,
         '2026-03-09',
         SERVICE.id,
         undefined,
@@ -322,7 +349,13 @@ describe('AvailabilityService', () => {
     const { service } = build({});
 
     await expect(
-      service.getAvailability('2026-12-31', SERVICE.id, undefined, earlyMorning),
+      service.getAvailability(
+        SHOP_ID,
+        '2026-12-31',
+        SERVICE.id,
+        undefined,
+        earlyMorning,
+      ),
     ).rejects.toThrow(/próximos 60 dias/);
   });
 
@@ -332,6 +365,7 @@ describe('AvailabilityService', () => {
 
       await expect(
         service.assertBookable(
+          SHOP_ID,
           'barber-1',
           SERVICE.id,
           // 20:00 local, muito depois do fim do turno.
@@ -347,6 +381,7 @@ describe('AvailabilityService', () => {
 
       await expect(
         service.assertBookable(
+          SHOP_ID,
           'barber-1',
           SERVICE.id,
           new Date('2026-03-10T12:00:00.000Z'),
@@ -360,6 +395,7 @@ describe('AvailabilityService', () => {
       const { service } = build({});
 
       const result = await service.assertBookable(
+        SHOP_ID,
         'barber-1',
         SERVICE.id,
         new Date('2026-03-10T12:00:00.000Z'),
@@ -369,5 +405,48 @@ describe('AvailabilityService', () => {
 
       expect(result.endTime.toISOString()).toBe('2026-03-10T12:30:00.000Z');
     });
+  });
+
+  it('só consulta serviço, barbeiros e feriados da barbearia informada', async () => {
+    const { service, prisma } = build({});
+
+    await service.getAvailability(
+      SHOP_ID,
+      TUESDAY,
+      SERVICE.id,
+      undefined,
+      earlyMorning,
+    );
+
+    expect(prisma.service.findFirst).toHaveBeenCalledWith({
+      where: { id: SERVICE.id, shopId: SHOP_ID },
+    });
+    expect(prisma.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ shopId: SHOP_ID, role: 'BARBER' }),
+      }),
+    );
+    expect(prisma.holiday.findUnique).toHaveBeenCalledWith({
+      where: {
+        shopId_date: {
+          shopId: SHOP_ID,
+          date: new Date('2026-03-10T00:00:00.000Z'),
+        },
+      },
+    });
+  });
+
+  it('serviço de outra barbearia se comporta como inexistente', async () => {
+    const { service } = build({ service: null });
+
+    await expect(
+      service.getAvailability(
+        'shop-2',
+        TUESDAY,
+        SERVICE.id,
+        undefined,
+        earlyMorning,
+      ),
+    ).rejects.toThrow('Serviço não encontrado.');
   });
 });
