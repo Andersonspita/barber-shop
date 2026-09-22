@@ -158,3 +158,26 @@ export function labelToMinutes(label: string): number {
   const [hours, minutes] = label.split(':').map(Number);
   return (hours || 0) * 60 + (minutes || 0);
 }
+
+/**
+ * "Hoje", "Amanhã" ou "Em 3 dias" — é assim que Booksy, Fresha e afins
+ * anunciam o próximo horário, e é o que o cliente quer saber primeiro.
+ */
+export function relativeDayLabel(value: string | Date): string {
+  const target = parseISODate(toISODate(asDate(value)));
+  const today = parseISODate(todayISO());
+  const days = Math.round((target.getTime() - today.getTime()) / 86_400_000);
+  if (days === 0) return 'Hoje';
+  if (days === 1) return 'Amanhã';
+  if (days === -1) return 'Ontem';
+  if (days > 1) return `Em ${days} dias`;
+  return `Há ${-days} dias`;
+}
+
+/** Período do dia de um horário `HH:MM`, para agrupar a grade de horários. */
+export function dayPeriod(time: string): 'Manhã' | 'Tarde' | 'Noite' {
+  const hour = Number(time.slice(0, 2));
+  if (hour < 12) return 'Manhã';
+  if (hour < 18) return 'Tarde';
+  return 'Noite';
+}

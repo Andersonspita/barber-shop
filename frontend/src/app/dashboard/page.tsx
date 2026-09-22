@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   CalendarDays,
   CalendarRange,
@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Lock,
+  MessageCircle,
   Plus,
   UserX,
   X,
@@ -81,6 +82,7 @@ export default function DashboardPage() {
     status: 'CANCELLED' | 'NO_SHOW';
   } | null>(null);
   const [pending, setPending] = useState(false);
+  const now = useNow();
 
   // A agenda passa a ser sempre de um dia. Antes a rota devolvia todo o
   // histórico do barbeiro em ordem crescente, o que empurrava os
@@ -136,6 +138,15 @@ export default function DashboardPage() {
   if (!ready || !user) return null;
 
   const isToday = date === todayISO();
+
+  // O atendimento em curso ou o próximo da fila. Nos painéis do setor
+  // (Trinks, AppBarber) é a primeira coisa que o barbeiro procura na tela.
+  const focusId = isToday
+    ? appointments.find(
+        (item) =>
+          item.status === 'SCHEDULED' && new Date(item.endTime).getTime() > now,
+      )?.id
+    : undefined;
 
   return (
     <>
@@ -268,6 +279,8 @@ export default function DashboardPage() {
               <li key={appointment.id}>
                 <AppointmentRow
                   appointment={appointment}
+                  now={now}
+                  focused={appointment.id === focusId}
                   pending={pending}
                   onComplete={() => updateStatus(appointment, 'COMPLETED')}
                   onCancel={() =>
@@ -342,8 +355,28 @@ export default function DashboardPage() {
   );
 }
 
+/** Relógio que avança a cada 30 s, para o "em 12 min" não congelar. */
+function useNow(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return now;
+}
+
+function focusLabel(appointment: Appointment, now: number): string {
+  const start = new Date(appointment.startTime).getTime();
+  if (start <= now) return 'Agora';
+  const minutes = Math.round((start - now) / 60_000);
+  if (minutes < 60) return `Próximo · em ${minutes} min`;
+  return `Próximo · às ${formatTime(appointment.startTime)}`;
+}
+
 function AppointmentRow({
   appointment,
+  now,
+  focused,
   pending,
   onComplete,
   onCancel,
@@ -351,6 +384,8 @@ function AppointmentRow({
   onReschedule,
 }: {
   appointment: Appointment;
+  now: number;
+  focused: boolean;
   pending: boolean;
   onComplete: () => void;
   onCancel: () => void;
@@ -361,7 +396,19 @@ function AppointmentRow({
   const isScheduled = appointment.status === 'SCHEDULED';
 
   return (
-    <Card className={cn('p-5', !isScheduled && 'opacity-75')}>
+    <Card
+      className={cn(
+        'relative overflow-hidden p-5',
+        !isScheduled && 'opacity-75',
+        focused && 'border-brand-500/60 bg-brand-500/[0.05]',
+      )}
+    >
+      {focused && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 w-1 bg-brand-500"
+        />
+      )}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-start gap-4">
           {/* Hora em destaque: é por ela que o barbeiro procura na lista. */}
@@ -379,7 +426,17 @@ function AppointmentRow({
               <h2 className="font-display text-base font-bold text-ink">
                 {appointment.client.name}
               </h2>
-              <Badge tone={status.tone}>{status.label}</Badge>
+              {focused ? (
+                <Badge tone="brand">
+                  <span className="relative flex h-2 w-2" aria-hidden="true">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-400" />
+                  </span>
+                  {focusLabel(appointment, now)}
+                </Badge>
+              ) : (
+                <Badge tone={status.tone}>{status.label}</Badge>
+              )}
             </div>
 
             <p className="text-sm text-ink-muted">
@@ -394,8 +451,10 @@ function AppointmentRow({
                 href={`https://wa.me/${appointment.client.phoneNumber.replace(/\D/g, '')}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-1 inline-block text-xs font-semibold tabular text-ink-subtle transition-colors hover:text-brand-400"
+                aria-label={`Chamar ${appointment.client.name} no WhatsApp`}
+                className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-success/30 bg-success/10 px-2.5 py-1 text-xs font-semibold tabular text-success transition-colors hover:bg-success hover:text-surface-0"
               >
+                <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" />
                 {formatPhone(appointment.client.phoneNumber)}
               </a>
             )}
