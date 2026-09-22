@@ -14,9 +14,13 @@ export interface WhatsappJob {
     | 'cancellation'
     | 'reschedule'
     | 'waitlist'
-    | 'birthday';
-  /** Define por qual número de WhatsApp a mensagem sai. */
-  shopId: string;
+    | 'birthday'
+    | 'platform';
+  /**
+   * Define por qual número de WhatsApp a mensagem sai. Vazio nas mensagens da
+   * própria plataforma (mensalidade), que saem pelo número padrão.
+   */
+  shopId?: string;
   to: string;
   message: string;
   appointmentId?: string;
@@ -146,6 +150,14 @@ export class NotificationsService {
         `A equipe da ${settings.name} deseja um ótimo aniversário. ` +
         `Passa aqui essa semana para comemorar com o visual em dia.`,
     });
+  }
+
+  /**
+   * Mensagem da plataforma para o dono da barbearia (mensalidade). Sai pelo
+   * número padrão da plataforma, não pelo da barbearia.
+   */
+  async platformNotice(to: string, message: string) {
+    await this.enqueue({ kind: 'platform', to, message });
   }
 
   // ---------------------------------------------------------------- internos

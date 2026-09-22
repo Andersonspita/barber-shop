@@ -179,20 +179,20 @@ model Holiday {
 /// A linha que existia antes do multi-tenant (id = "default") vira a primeira
 /// barbearia, com todos os dados antigos pendurados nela.
 model Shop {
-  id                        String   @id @default(uuid())
+  id                        String  @id @default(uuid())
   /// Identificador na URL pública: /<slug>. Só minúsculas, dígitos e hífen.
-  slug                      String   @unique
+  slug                      String  @unique
   /// Barbearia suspensa some da vitrine e não aceita login nem agendamento.
-  isActive                  Boolean  @default(true)
-  name                      String   @default("Gerente Barber")
-  timezone                  String   @default("America/Sao_Paulo")
-  slotIntervalMinutes       Int      @default(30)
+  isActive                  Boolean @default(true)
+  name                      String  @default("Gerente Barber")
+  timezone                  String  @default("America/Sao_Paulo")
+  slotIntervalMinutes       Int     @default(30)
   /// Antecedência mínima entre agora e o início do horário reservável.
-  minAdvanceMinutes         Int      @default(30)
+  minAdvanceMinutes         Int     @default(30)
   /// Até quantos dias no futuro o cliente pode marcar.
-  maxAdvanceDays            Int      @default(60)
+  maxAdvanceDays            Int     @default(60)
   /// Prazo mínimo, antes do horário, para o cliente cancelar sozinho.
-  cancellationWindowMinutes Int      @default(120)
+  cancellationWindowMinutes Int     @default(120)
   addressLine               String?
   city                      String?
   mapsUrl                   String?
@@ -203,16 +203,88 @@ model Shop {
   /// Instância da Evolution API com o número de WhatsApp desta barbearia.
   /// Vazia, as mensagens saem pela instância padrão da plataforma.
   whatsappInstance          String?
-  createdAt                 DateTime @default(now())
-  updatedAt                 DateTime @updatedAt
+
+  // ------------------------------------------------------------ mensalidade
+  /// Plano contratado. Vazio só em barbearia de cortesia antiga.
+  planCode      String?
+  /// Fim do teste grátis. A primeira fatura cobre o mês que começa aqui.
+  trialEndsAt   DateTime?
+  /// Cortesia: não gera fatura nem tem limite de profissionais. As barbearias
+  /// que já existiam antes da mensalidade entram assim, para nada mudar sem
+  /// uma decisão explícita de quem opera a plataforma.
+  billingExempt Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   users           User[]
   services        Service[]
   appointments    Appointment[]
   holidays        Holiday[]
   waitlistEntries WaitlistEntry[]
+  plan            Plan?           @relation(fields: [planCode], references: [code])
+  invoices        Invoice[]
 
   @@map("shops")
+}
+
+/// Plano de mensalidade, pelo número de profissionais ativos.
+model Plan {
+  /// Identificador estável (`solo`, `essencial`…), usado no código e na API.
+  code             String   @id
+  name             String
+  /// Máximo de profissionais ativos. Vazio = sem limite (cobra por excedente).
+  maxBarbers       Int?
+  /// Profissionais já incluídos na mensalidade.
+  includedBarbers  Int
+  monthlyPrice     Decimal  @db.Decimal(10, 2)
+  /// Valor por profissional acima de `includedBarbers`, nos planos sem limite.
+  extraBarberPrice Decimal? @db.Decimal(10, 2)
+  sortOrder        Int      @default(0)
+  isActive         Boolean  @default(true)
+  updatedAt        DateTime @updatedAt
+
+  shops Shop[]
+
+  @@map("plans")
+}
+
+enum InvoiceStatus {
+  OPEN
+  PAID
+  CANCELED
+}
+
+/// Fatura mensal de uma barbearia. Plano, profissionais e valor ficam
+/// congelados no momento em que a fatura é gerada: mudar o preço do plano
+/// depois não reescreve cobranças passadas.
+model Invoice {
+  id                String        @id @default(uuid())
+  shopId            String
+  /// Primeiro dia do mês coberto (inclusive) e dia seguinte ao último.
+  periodStart       DateTime
+  periodEnd         DateTime
+  /// Paga-se adiantado: vence no primeiro dia do período.
+  dueDate           DateTime
+  planCode          String
+  planName          String
+  barbers           Int
+  amount            Decimal       @db.Decimal(10, 2)
+  status            InvoiceStatus @default(OPEN)
+  paidAt            DateTime?
+  /// Observação de quem deu baixa: "Pix recebido em 05/10", por exemplo.
+  note              String?
+  /// Avisos de WhatsApp já enviados, para não repetir.
+  overdueNotifiedAt DateTime?
+  blockedNotifiedAt DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, periodStart])
+  @@index([status, dueDate])
+  @@map("invoices")
 }
 
 model PasswordResetToken {
