@@ -6,6 +6,7 @@ import {
   KeyRound,
   LogOut,
   MessageCircle,
+  Pencil,
   Plus,
   Power,
   Store,
@@ -116,9 +117,9 @@ export default function PlatformPage() {
 
   const update = async (
     shop: PlatformShop,
-    patch: Partial<Pick<PlatformShop, 'isActive' | 'whatsappInstance'>>,
+    patch: Partial<Pick<PlatformShop, 'isActive' | 'whatsappInstance' | 'slug'>>,
     message: string,
-  ) => {
+  ): Promise<boolean> => {
     try {
       await call(`/platform/shops/${shop.id}`, {
         method: 'PATCH',
@@ -126,11 +127,13 @@ export default function PlatformPage() {
       });
       toast.success(message);
       reload();
+      return true;
     } catch (caught) {
       toast.error(
         'Não foi possível salvar',
         caught instanceof ApiError ? caught.message : undefined,
       );
+      return false;
     }
   };
 
@@ -308,12 +311,13 @@ function ShopRow({
   shop: PlatformShop;
   onUpdate: (
     shop: PlatformShop,
-    patch: Partial<Pick<PlatformShop, 'isActive' | 'whatsappInstance'>>,
+    patch: Partial<Pick<PlatformShop, 'isActive' | 'whatsappInstance' | 'slug'>>,
     message: string,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
 }) {
   const [instance, setInstance] = useState(shop.whatsappInstance ?? '');
   const dirty = instance.trim() !== (shop.whatsappInstance ?? '');
+  const [editingSlug, setEditingSlug] = useState(false);
 
   return (
     <Card className={cn('p-5', !shop.isActive && 'opacity-70')}>
@@ -336,6 +340,14 @@ function ShopRow({
             /{shop.slug}
             <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
           </a>
+          <button
+            type="button"
+            onClick={() => setEditingSlug(true)}
+            className="ml-3 inline-flex items-center gap-1 text-xs font-semibold text-ink-subtle transition-colors hover:text-ink"
+          >
+            <Pencil className="h-3 w-3" aria-hidden="true" />
+            Alterar endereço
+          </button>
           <p className="mt-1 text-xs tabular text-ink-subtle">
             {[
               shop.city,
@@ -406,7 +418,101 @@ function ShopRow({
           </Button>
         </div>
       </div>
+      {editingSlug && (
+        <ChangeSlugDialog
+          shop={shop}
+          onClose={() => setEditingSlug(false)}
+          onSave={async (slug) => {
+            const saved = await onUpdate(
+              shop,
+              { slug },
+              `Endereço alterado para /${slug}.`,
+            );
+            if (saved) setEditingSlug(false);
+          }}
+        />
+      )}
     </Card>
+  );
+}
+
+/**
+ * Troca o endereço público da barbearia. O link antigo para de funcionar na
+ * hora — não há redirecionamento —, então o aviso vem antes da confirmação.
+ */
+function ChangeSlugDialog({
+  shop,
+  onClose,
+  onSave,
+}: {
+  shop: PlatformShop;
+  onClose: () => void;
+  onSave: (slug: string) => Promise<void>;
+}) {
+  const [slug, setSlug] = useState(shop.slug);
+  const [saving, setSaving] = useState(false);
+  const clean = slugify(slug);
+  const changed = clean.length > 0 && clean !== shop.slug;
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!changed) return;
+    setSaving(true);
+    try {
+      await onSave(clean);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Alterar endereço"
+      description={shop.name}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>
+            Cancelar
+          </Button>
+          <Button
+            type="submit"
+            form="change-slug"
+            loading={saving}
+            disabled={!changed}
+          >
+            Salvar endereço
+          </Button>
+        </>
+      }
+    >
+      <form id="change-slug" onSubmit={submit} className="space-y-4">
+        <Field
+          label="Novo endereço (slug)"
+          hint={`Vitrine em /${clean || 'endereco'} · letras minúsculas, números e hífen`}
+        >
+          {(props) => (
+            <Input
+              {...props}
+              required
+              autoFocus
+              value={slug}
+              onChange={(e) => setSlug(slugify(e.target.value, true))}
+            />
+          )}
+        </Field>
+        <p
+          role="note"
+          className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm leading-relaxed text-danger"
+        >
+          O link antigo <strong>/{shop.slug}</strong> deixa de funcionar na
+          hora. Avise a barbearia para atualizar o link no Instagram, no Google
+          e no WhatsApp. Contas, agenda e histórico continuam iguais; quem
+          estiver logado só precisa entrar de novo no endereço novo.
+        </p>
+      </form>
+    </Modal>
   );
 }
 

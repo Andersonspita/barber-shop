@@ -16,6 +16,22 @@ import { PrismaService } from '../src/prisma/prisma.service';
  *   npm run test:e2e -- tenant-isolation
  */
 const PLATFORM_KEY = 'chave-e2e-plataforma';
+
+// Formato das respostas usadas no teste — o `body` do supertest é `any`.
+interface CreatedShopBody {
+  shop: { id: string };
+  admin: { temporaryPassword: string };
+}
+interface SessionBody {
+  access_token: string;
+  user: { id: string };
+}
+interface IdBody {
+  id: string;
+}
+interface Slot {
+  dateTime: string;
+}
 const RUN = Date.now().toString(36);
 
 describe('Isolamento entre barbearias (e2e)', () => {
@@ -56,26 +72,28 @@ describe('Isolamento entre barbearias (e2e)', () => {
           adminEmail: 'admin@e2e.com',
         })
         .expect(201);
-      createdShopIds.push(created.body.shop.id as string);
-      if (shop === shopB) shopBId = created.body.shop.id as string;
+      const createdBody = created.body as CreatedShopBody;
+      createdShopIds.push(createdBody.shop.id);
+      if (shop === shopB) shopBId = createdBody.shop.id;
 
       const login = await request(app.getHttpServer())
         .post('/auth/login')
         .set('x-shop', shop.slug)
         .send({
           email: 'admin@e2e.com',
-          pass: created.body.admin.temporaryPassword,
+          pass: createdBody.admin.temporaryPassword,
         })
         .expect(201);
-      shop.token = login.body.access_token;
-      shop.adminId = login.body.user.id;
+      const session = login.body as SessionBody;
+      shop.token = session.access_token;
+      shop.adminId = session.user.id;
 
       const service = await request(app.getHttpServer())
         .post('/admin/services')
         .set('Authorization', `Bearer ${shop.token}`)
         .send({ name: `Corte ${shop.slug}`, durationMinutes: 30, price: 50 })
         .expect(201);
-      shop.serviceId = service.body.id;
+      shop.serviceId = (service.body as IdBody).id;
     }
   });
 
@@ -184,7 +202,9 @@ describe('Isolamento entre barbearias (e2e)', () => {
 
       const a = await signup(shopA.slug).expect(201);
       const b = await signup(shopB.slug).expect(201);
-      expect(a.body.user.id).not.toBe(b.body.user.id);
+      expect((a.body as SessionBody).user.id).not.toBe(
+        (b.body as SessionBody).user.id,
+      );
     });
 
     it('não entra com a conta de uma barbearia na outra', async () => {
@@ -207,9 +227,8 @@ describe('Isolamento entre barbearias (e2e)', () => {
   describe('painel do admin', () => {
     it('lista de clientes só traz os da própria barbearia', async () => {
       const res = await as(shopB).get('/admin/clients').expect(200);
-      const emails = (res.body.items as Array<{ email: string }>).map(
-        (c) => c.email,
-      );
+      const { items } = res.body as { items: Array<{ email: string }> };
+      const emails = items.map((c) => c.email);
       expect(emails).toEqual([`duplo-${RUN}@e2e.com`]);
     });
 
@@ -274,16 +293,17 @@ describe('Isolamento entre barbearias (e2e)', () => {
         .query({ date, serviceId: shopA.serviceId })
         .set('x-shop', shopA.slug)
         .expect(200);
-      expect(slots.body.length).toBeGreaterThan(0);
+      const available = slots.body as Slot[];
+      expect(available.length).toBeGreaterThan(0);
 
       const booked = await as(shopA)
         .post('/appointments')
         .send({
           serviceId: shopA.serviceId,
-          startTime: slots.body[0].dateTime,
+          startTime: available[0].dateTime,
         })
         .expect(201);
-      appointmentId = booked.body.appointment.id;
+      appointmentId = (booked.body as { appointment: IdBody }).appointment.id;
     });
 
     it('admin de outra barbearia não cancela nem remarca', async () => {
@@ -305,8 +325,10 @@ describe('Isolamento entre barbearias (e2e)', () => {
         .query({ date: nextWeekday() })
         .expect(200);
       const all = (
-        agenda.body.columns as Array<{ appointments: Array<{ id: string }> }>
-      ).flatMap((c) => c.appointments.map((a) => a.id));
+        agenda.body as {
+          columns: Array<{ appointments: Array<{ id: string }> }>;
+        }
+      ).columns.flatMap((c) => c.appointments.map((a) => a.id));
       expect(all).not.toContain(appointmentId);
 
       const today = new Date().toISOString().slice(0, 10);
@@ -314,7 +336,7 @@ describe('Isolamento entre barbearias (e2e)', () => {
         .get('/appointments/metrics/advanced')
         .query({ startDate: today, endDate: '2099-12-31' })
         .expect(200);
-      expect(metrics.body.totalRevenue).toBe(0);
+      expect((metrics.body as { totalRevenue: number }).totalRevenue).toBe(0);
     });
 
     it('encaixe não aceita cliente de outra barbearia', async () => {
@@ -329,10 +351,50 @@ describe('Isolamento entre barbearias (e2e)', () => {
         .send({
           serviceId: shopB.serviceId,
           startTime: new Date(Date.now() + 86_400_000).toISOString(),
-          clientId: client.body.user.id,
+          clientId: (client.body as SessionBody).user.id,
           force: true,
         })
         .expect(404);
+    });
+  });
+
+  describe('troca de endereço', () => {
+    it('o slug novo passa a valer na hora e o antigo sai do ar', async () => {
+      const oldSlug = shopA.slug;
+      const newSlug = `${oldSlug}-novo`;
+
+      await request(app.getHttpServer())
+        .patch(`/platform/shops/${createdShopIds[0]}`)
+        .set('x-platform-key', PLATFORM_KEY)
+        .send({ slug: newSlug })
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .get('/shop')
+        .set('x-shop', oldSlug)
+        .expect(404);
+      const shop = await request(app.getHttpServer())
+        .get('/shop')
+        .set('x-shop', newSlug)
+        .expect(200);
+      expect((shop.body as { slug: string }).slug).toBe(newSlug);
+
+      // A sessão é da barbearia, não do endereço: o token segue válido.
+      await request(app.getHttpServer())
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${shopA.token}`)
+        .set('x-shop', newSlug)
+        .expect(200);
+
+      shopA.slug = newSlug;
+    });
+
+    it('recusa slug já usado por outra barbearia', async () => {
+      await request(app.getHttpServer())
+        .patch(`/platform/shops/${createdShopIds[0]}`)
+        .set('x-platform-key', PLATFORM_KEY)
+        .send({ slug: shopB.slug })
+        .expect(400);
     });
   });
 

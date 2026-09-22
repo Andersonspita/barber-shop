@@ -44,7 +44,7 @@ em várias, como contas independentes (senha e histórico próprios). O navegado
 guarda uma sessão por barbearia, e o token de uma é recusado na página de outra.
 
 **Painel da plataforma** (`APP_URL/plataforma`). Onde você, que opera o sistema,
-cadastra barbearias, suspende e liga o WhatsApp de cada uma. O acesso é a chave
+cadastra barbearias, troca o endereço, suspende e liga o WhatsApp de cada uma. O acesso é a chave
 `PLATFORM_ADMIN_KEY` do `.env` — sem ela o painel fica desligado. Ao criar uma
 barbearia, ela já nasce com o primeiro administrador; a senha temporária
 aparece uma única vez e a troca é obrigatória no primeiro acesso. Suspender
@@ -55,9 +55,8 @@ barbearia que já estava no ar vira a `principal`, com todos os dados, em
 `APP_URL/principal`. Para que links antigos da API sem barbearia continuem
 funcionando, defina `DEFAULT_SHOP_SLUG=principal` no `.env`. Os links antigos
 do site (`APP_URL/reservas`, `APP_URL/login`) passam a dar 404; divulgue o novo
-endereço. O slug pode ser trocado pela API da plataforma
-(`PATCH /platform/shops/<id>` com `{"slug": "novo-endereco"}` e o cabeçalho
-`X-Platform-Key`); a tela `/plataforma` ainda não tem esse campo.
+endereço. O slug pode ser trocado em `/plataforma`, em **Alterar endereço** —
+o endereço antigo deixa de funcionar na hora.
 
 ## Configuração da agenda
 
