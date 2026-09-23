@@ -23,7 +23,7 @@ horário; relatório financeiro com comissão.
 
 **Administrador** — agenda da barbearia inteira, cadastro de clientes, equipe
 (com jornada semanal e comissão por profissional), serviços, feriados e as
-regras da agenda.
+regras da agenda, e a assinatura da barbearia (plano e faturas).
 
 ## Várias barbearias (multi-tenant)
 
@@ -44,7 +44,8 @@ em várias, como contas independentes (senha e histórico próprios). O navegado
 guarda uma sessão por barbearia, e o token de uma é recusado na página de outra.
 
 **Painel da plataforma** (`APP_URL/plataforma`). Onde você, que opera o sistema,
-cadastra barbearias, troca o endereço, suspende e liga o WhatsApp de cada uma. O acesso é a chave
+cadastra barbearias, troca o endereço, suspende, liga o WhatsApp e cuida da
+mensalidade de cada uma. O acesso é a chave
 `PLATFORM_ADMIN_KEY` do `.env` — sem ela o painel fica desligado. Ao criar uma
 barbearia, ela já nasce com o primeiro administrador; a senha temporária
 aparece uma única vez e a troca é obrigatória no primeiro acesso. Suspender
@@ -57,6 +58,58 @@ funcionando, defina `DEFAULT_SHOP_SLUG=principal` no `.env`. Os links antigos
 do site (`APP_URL/reservas`, `APP_URL/login`) passam a dar 404; divulgue o novo
 endereço. O slug pode ser trocado em `/plataforma`, em **Alterar endereço** —
 o endereço antigo deixa de funcionar na hora.
+
+## Mensalidade das barbearias
+
+Cada barbearia paga uma mensalidade conforme o número de **profissionais
+ativos** (administradores que não atendem não contam):
+
+| Plano        | Profissionais | Mensalidade                                   |
+| ------------ | ------------- | --------------------------------------------- |
+| Solo         | 1             | R$ 35,00                                      |
+| Essencial    | até 3         | R$ 89,90                                      |
+| Profissional | até 6         | R$ 149,90                                     |
+| Premium      | até 10        | R$ 219,90                                     |
+| Rede         | sem limite    | R$ 219,90 com 10 inclusos + R$ 19,90 por extra |
+
+Os preços ficam no banco e são editáveis em `/plataforma` → **Planos e
+preços**. Mudar um preço vale para as próximas faturas; as já geradas não
+mudam.
+
+**Ciclo.** A barbearia nova nasce no plano escolhido (padrão Solo) com
+`BILLING_TRIAL_DAYS` dias de teste grátis. A mensalidade é paga adiantada: a
+primeira fatura cobre o mês que começa no fim do teste e vence nesse dia; as
+seguintes emendam na anterior. Cada fatura é gerada
+`BILLING_INVOICE_DAYS_BEFORE` dias antes do vencimento, e o administrador da
+barbearia é avisado pelo WhatsApp.
+
+**Atraso.** Vencida, a fatura deixa a assinatura **em atraso**, e tudo segue
+funcionando por `BILLING_GRACE_DAYS` dias. Passada a tolerância, só o
+**agendamento online dos clientes** é pausado: a vitrine mostra o contato da
+barbearia no lugar do botão de agendar. Agenda, encaixes, painel e horários já
+marcados continuam normais. O administrador recebe um aviso no atraso e outro
+na pausa.
+
+**Pagamento.** Ainda não há integração com cartão ou Pix: o pagamento é
+combinado por fora (o texto de `BILLING_PAYMENT_INSTRUCTIONS` aparece para o
+administrador e nas mensagens) e você dá a **baixa manual** em `/plataforma` →
+**Assinatura** → **Marcar como paga**. A baixa libera o agendamento na hora.
+
+**Limite do plano.** Cadastrar ou reativar um profissional além do limite é
+recusado com a indicação do plano que comporta a equipe. O administrador troca
+de plano sozinho em **Painel → Assinatura**; não é possível ir para um plano
+menor que a equipe atual.
+
+**Cortesia.** Barbearias marcadas como cortesia não geram fatura nem têm limite
+de profissionais. Na atualização, todas as barbearias que já existiam viram
+cortesia, no plano que comporta a equipe delas; tire a marcação em
+`/plataforma` → **Assinatura** quando for começar a cobrar.
+
+No painel da plataforma, cada barbearia mostra a situação (cortesia, teste
+grátis, em dia, em atraso, agendamento pausado). Em **Assinatura** dá para
+trocar o plano, mudar o fim do teste, marcar cortesia, gerar a próxima fatura
+na hora e cancelar ou reabrir faturas. Uma rotina de hora em hora gera as
+faturas e envia os avisos, sem duplicar.
 
 ## Configuração da agenda
 
@@ -122,7 +175,7 @@ Pré-requisito: Docker e Docker Compose instalados no VPS ([guia oficial](https:
 ### Primeiro acesso
 
 Abra `APP_URL/plataforma`, entre com a `PLATFORM_ADMIN_KEY` e cadastre a
-primeira barbearia com o administrador dela. Ele entra em
+primeira barbearia com o administrador dela, o plano e os dias de teste. Ele entra em
 `APP_URL/<slug>/login?area=profissional` e monta equipe, serviços e horários.
 Contas criadas pelo administrador também recebem uma **senha temporária
 sorteada**, mostrada uma única vez na tela, e a troca é obrigatória no primeiro
@@ -182,7 +235,8 @@ docker compose exec backend npx prisma db seed
 
 Cria duas barbearias — `principal` (São Paulo) e `navalha-de-ouro` (Recife) —
 com equipe, serviços, jornada da semana e o mesmo cliente cadastrado nas duas,
-para ver o isolamento na prática. As credenciais aparecem no final da saída do
+para ver o isolamento na prática. A `principal` fica no plano Essencial e a
+`navalha-de-ouro` no Solo, ambas em teste grátis de 14 dias. As credenciais aparecem no final da saída do
 comando. **O seed apaga os dados existentes: não rode em produção.**
 
 ## Desenvolvimento
@@ -208,4 +262,7 @@ cd backend && npm test
 # isolamento entre barbearias, contra Postgres e Redis reais (use um banco
 # de teste; o teste cria e apaga as próprias barbearias)
 cd backend && npm run test:e2e -- tenant-isolation
+
+# mensalidade: teste grátis, limite do plano, atraso, pausa e baixa manual
+cd backend && npm run test:e2e -- billing
 ```

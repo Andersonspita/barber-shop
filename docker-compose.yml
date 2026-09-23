@@ -53,6 +53,11 @@ services:
       # chave do painel /plataforma (vazia = painel desligado).
       DEFAULT_SHOP_SLUG: ${DEFAULT_SHOP_SLUG:-}
       PLATFORM_ADMIN_KEY: ${PLATFORM_ADMIN_KEY:-}
+      # Mensalidade: teste grátis, tolerância, antecedência da fatura e como pagar.
+      BILLING_TRIAL_DAYS: ${BILLING_TRIAL_DAYS:-14}
+      BILLING_GRACE_DAYS: ${BILLING_GRACE_DAYS:-7}
+      BILLING_INVOICE_DAYS_BEFORE: ${BILLING_INVOICE_DAYS_BEFORE:-5}
+      BILLING_PAYMENT_INSTRUCTIONS: ${BILLING_PAYMENT_INSTRUCTIONS:-}
       # O fuso da barbearia fica no banco (configurável na tela de ajustes),
       # não aqui: o motor de agenda não depende mais do relógio do contêiner.
       TZ: UTC
