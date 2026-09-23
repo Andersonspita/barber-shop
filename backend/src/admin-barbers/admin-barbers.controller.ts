@@ -15,6 +15,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminOnly } from '../common/roles.guard';
 import { ShopId } from '../common/shop-context';
+import { BillingService } from '../billing/billing.service';
 import { generateTemporaryPassword } from '../common/password.util';
 import {
   CreateBarberDto,
@@ -39,7 +40,10 @@ const BARBER_FIELDS = {
 @AdminOnly()
 @Controller('admin/barbers')
 export class AdminBarbersController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly billing: BillingService,
+  ) {}
 
   @Get()
   async list(@ShopId() shopId: string) {
@@ -61,6 +65,8 @@ export class AdminBarbersController {
   @Post()
   async create(@ShopId() shopId: string, @Body() body: CreateBarberDto) {
     await this.assertEmailAvailable(shopId, body.email);
+    // Todo profissional novo nasce ativo e conta no plano.
+    await this.billing.assertCanAddBarber(shopId);
 
     const temporaryPassword = generateTemporaryPassword();
     const barber = await this.prisma.user.create({
@@ -89,7 +95,12 @@ export class AdminBarbersController {
           startMinute: 9 * 60,
           endMinute: 18 * 60,
         })),
-        { barberId: barber.id, weekday: 6, startMinute: 9 * 60, endMinute: 14 * 60 },
+        {
+          barberId: barber.id,
+          weekday: 6,
+          startMinute: 9 * 60,
+          endMinute: 14 * 60,
+        },
       ],
       skipDuplicates: true,
     });
@@ -103,8 +114,12 @@ export class AdminBarbersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: UpdateBarberDto,
   ) {
-    await this.assertOwned(shopId, id);
+    const current = await this.assertOwned(shopId, id);
     await this.assertEmailAvailable(shopId, body.email, id);
+    // Reativar pela edição também ocupa uma vaga do plano.
+    if (!current.isActive && (body.isActive ?? true)) {
+      await this.billing.assertCanAddBarber(shopId);
+    }
 
     return this.prisma.user.update({
       where: { id },
@@ -134,7 +149,11 @@ export class AdminBarbersController {
   ) {
     await this.assertOwned(shopId, id);
     const upcoming = await this.prisma.appointment.count({
-      where: { barberId: id, status: 'SCHEDULED', startTime: { gte: new Date() } },
+      where: {
+        barberId: id,
+        status: 'SCHEDULED',
+        startTime: { gte: new Date() },
+      },
     });
 
     const barber = await this.prisma.user.update({
@@ -157,7 +176,8 @@ export class AdminBarbersController {
     @ShopId() shopId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    await this.assertOwned(shopId, id);
+    const current = await this.assertOwned(shopId, id);
+    if (!current.isActive) await this.billing.assertCanAddBarber(shopId);
     return this.prisma.user.update({
       where: { id },
       data: { isActive: true },
@@ -277,9 +297,10 @@ export class AdminBarbersController {
   private async assertOwned(shopId: string, id: string) {
     const found = await this.prisma.user.findFirst({
       where: { id, shopId, role: 'BARBER' },
-      select: { id: true },
+      select: { id: true, isActive: true },
     });
     if (!found) throw new NotFoundException('Profissional não encontrado.');
+    return found;
   }
 
   private async assertEmailAvailable(

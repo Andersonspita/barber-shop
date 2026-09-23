@@ -1,9 +1,12 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
-import { PlatformController } from './platform.controller';
+import {
+  PlatformBillingController,
+  PlatformController,
+} from './platform.controller';
 
 @Module({
   imports: [PrismaModule],
-  controllers: [PlatformController],
+  controllers: [PlatformController, PlatformBillingController],
 })
 export class PlatformModule {}

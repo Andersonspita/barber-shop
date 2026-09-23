@@ -17,6 +17,7 @@ import { ScheduleBlocksModule } from './schedule-blocks/schedule-blocks.module';
 import { PublicCatalogModule } from './public-catalog/public-catalog.module';
 import { WaitlistModule } from './waitlist/waitlist.module';
 import { PlatformModule } from './platform/platform.module';
+import { BillingModule } from './billing/billing.module';
 import { ShopResolverMiddleware } from './common/shop-context';
 
 @Module({
@@ -34,6 +35,7 @@ import { ShopResolverMiddleware } from './common/shop-context';
     PublicCatalogModule,
     WaitlistModule,
     PlatformModule,
+    BillingModule,
     // Teto geral de requisições; o login tem um limite bem mais estreito,
     // declarado na própria rota.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),

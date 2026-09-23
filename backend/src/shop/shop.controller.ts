@@ -16,6 +16,7 @@ import { AdminOnly } from '../common/roles.guard';
 import { ShopId } from '../common/shop-context';
 import { dateOnlyToUtcMidnight, parseDateOnly } from '../common/time.util';
 import { ShopSettingsService } from './shop-settings.service';
+import { BillingService } from '../billing/billing.service';
 import { UpdateShopSettingsDto, UpsertHolidayDto } from './dto';
 
 @Controller()
@@ -23,6 +24,7 @@ export class ShopController {
   constructor(
     private readonly settings: ShopSettingsService,
     private readonly prisma: PrismaService,
+    private readonly billing: BillingService,
   ) {}
 
   /**
@@ -41,7 +43,12 @@ export class ShopController {
   /** Dados que a landing page da barbearia mostra sem login. */
   @Get('shop')
   async getPublicShop(@ShopId() shopId: string) {
-    return this.settings.publicInfo(shopId);
+    const [info, blocked] = await Promise.all([
+      this.settings.publicInfo(shopId),
+      this.billing.onlineBookingBlocked(shopId),
+    ]);
+    // A vitrine continua no ar; só o botão de agendar dá lugar a um aviso.
+    return { ...info, onlineBookingEnabled: !blocked };
   }
 
   @AdminOnly()

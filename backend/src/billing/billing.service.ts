@@ -128,6 +128,67 @@ export class BillingService {
     };
   }
 
+  /** Resumo curto, para a lista de barbearias da plataforma. */
+  async brief(shopId: string, now = new Date()) {
+    const shop = await this.loadShop(shopId);
+    const [oldestOpen, activeBarbers] = await Promise.all([
+      this.oldestOpenInvoice(shopId),
+      this.activeBarbers(shopId),
+    ]);
+    return {
+      status: this.computeStatus(shop, oldestOpen, now),
+      exempt: shop.billingExempt,
+      plan: shop.plan ? this.planView(shop.plan) : null,
+      trialEndsAt: shop.trialEndsAt ? isoDate(shop.trialEndsAt) : null,
+      nextAmount: shop.plan
+        ? centsToDecimalString(invoiceAmountCents(shop.plan, activeBarbers))
+        : null,
+      openInvoice: oldestOpen ? this.invoiceView(oldestOpen) : null,
+    };
+  }
+
+  /** Fim do teste grátis para uma barbearia criada hoje. */
+  trialEndFor(
+    timezone: string,
+    trialDays: number,
+    now = new Date(),
+  ): Date | null {
+    if (trialDays <= 0) return null;
+    return dateOnlyToUtcMidnight(
+      addDaysISO(shopToday(timezone, now), trialDays),
+    );
+  }
+
+  async updatePlanPrices(
+    code: string,
+    data: { name?: string; monthlyPrice?: number; extraBarberPrice?: number },
+  ) {
+    const plan = await this.prisma.plan.findUnique({ where: { code } });
+    if (!plan) throw new NotFoundException('Plano não encontrado.');
+    if (data.extraBarberPrice !== undefined && plan.maxBarbers !== null) {
+      throw new BadRequestException(
+        'Valor por profissional extra só existe em plano sem limite de profissionais.',
+      );
+    }
+    const updated = await this.prisma.plan.update({
+      where: { code },
+      data: {
+        ...(data.name !== undefined ? { name: data.name.trim() } : {}),
+        ...(data.monthlyPrice !== undefined
+          ? { monthlyPrice: data.monthlyPrice.toFixed(2) }
+          : {}),
+        ...(data.extraBarberPrice !== undefined
+          ? { extraBarberPrice: data.extraBarberPrice.toFixed(2) }
+          : {}),
+      },
+    });
+    return this.planView(updated);
+  }
+
+  async planViews() {
+    return (await this.plans()).map((plan) => this.planView(plan));
+  }
+
   /** O agendamento online está pausado por falta de pagamento? */
   async onlineBookingBlocked(shopId: string): Promise<boolean> {
     return (await this.status(shopId)) === 'BLOCKED';

@@ -19,6 +19,10 @@ const WEEK_SHIFTS = [
 
 interface ShopSeed {
   slug: string;
+  /** Plano da mensalidade (os planos vêm da migração). */
+  planCode: string;
+  /** Dias de teste grátis a partir de hoje. */
+  trialDays: number;
   settings: {
     name: string;
     timezone: string;
@@ -56,6 +60,8 @@ interface ShopSeed {
 const SHOPS: ShopSeed[] = [
   {
     slug: 'principal',
+    planCode: 'essencial',
+    trialDays: 14,
     settings: {
       name: 'Gerente Barber',
       timezone: 'America/Sao_Paulo',
@@ -120,6 +126,8 @@ const SHOPS: ShopSeed[] = [
   },
   {
     slug: 'navalha-de-ouro',
+    planCode: 'solo',
+    trialDays: 14,
     settings: {
       name: 'Navalha de Ouro',
       timezone: 'America/Recife',
@@ -168,13 +176,23 @@ const SHOPS: ShopSeed[] = [
 async function seedShop(seed: ShopSeed, passwordHash: string) {
   // A primeira barbearia reaproveita a linha "default" criada pela migração,
   // para que uma base já existente não ganhe uma barbearia duplicada.
+  const trialEnd = new Date();
+  trialEnd.setUTCHours(0, 0, 0, 0);
+  trialEnd.setUTCDate(trialEnd.getUTCDate() + seed.trialDays);
+  const billing = {
+    planCode: seed.planCode,
+    trialEndsAt: trialEnd,
+    billingExempt: false,
+  };
+
   const shop = await prisma.shop.upsert({
     where: { slug: seed.slug },
-    update: seed.settings,
+    update: { ...seed.settings, ...billing },
     create: {
       ...(seed.slug === 'principal' ? { id: 'default' } : {}),
       slug: seed.slug,
       ...seed.settings,
+      ...billing,
     },
   });
 
@@ -234,6 +252,7 @@ async function main() {
   await prisma.scheduleBlock.deleteMany();
   await prisma.passwordResetToken.deleteMany();
   await prisma.holiday.deleteMany();
+  await prisma.invoice.deleteMany();
   await prisma.service.deleteMany();
   await prisma.user.deleteMany();
 
