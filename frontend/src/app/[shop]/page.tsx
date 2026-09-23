@@ -42,6 +42,9 @@ export default async function LandingPage({
   if (!shop) notFound();
 
   const href = (path: string) => shopHref(shop.slug, path);
+  // Mensalidade atrasada além da tolerância: a vitrine continua no ar, mas
+  // o agendamento pelo cliente dá lugar a um aviso com o contato da casa.
+  const bookingEnabled = shop.onlineBookingEnabled !== false;
 
   const whatsappLink = shop.whatsapp
     ? `https://wa.me/${shop.whatsapp.replace(/\D/g, '')}`
@@ -54,7 +57,11 @@ export default async function LandingPage({
 
   return (
     <>
-      <LandingHeader shopName={shop.name} basePath={href('/')} />
+      <LandingHeader
+        shopName={shop.name}
+        basePath={href('/')}
+        bookingEnabled={bookingEnabled}
+      />
       <StructuredData shop={shop} services={services} rating={rating} />
 
       <main id="conteudo" className="pt-18">
@@ -80,20 +87,27 @@ export default async function LandingPage({
                 'Escolha o serviço, o profissional e o horário. Você recebe a confirmação no WhatsApp e um lembrete antes de sair de casa.'}
             </p>
 
-            <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <Link
-                href={href('/reservas/nova')}
-                className="w-full rounded-2xl bg-brand-500 px-8 py-4 font-display text-base font-bold text-surface-0 transition-colors hover:bg-brand-400 sm:w-auto"
-              >
-                Agendar agora
-              </Link>
-              <a
-                href="#servicos"
-                className="w-full rounded-2xl border border-line-strong bg-surface-1 px-8 py-4 font-display text-base font-bold text-ink transition-colors hover:bg-surface-2 sm:w-auto"
-              >
-                Ver serviços e preços
-              </a>
-            </div>
+            {bookingEnabled ? (
+              <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+                <Link
+                  href={href('/reservas/nova')}
+                  className="w-full rounded-2xl bg-brand-500 px-8 py-4 font-display text-base font-bold text-surface-0 transition-colors hover:bg-brand-400 sm:w-auto"
+                >
+                  Agendar agora
+                </Link>
+                <a
+                  href="#servicos"
+                  className="w-full rounded-2xl border border-line-strong bg-surface-1 px-8 py-4 font-display text-base font-bold text-ink transition-colors hover:bg-surface-2 sm:w-auto"
+                >
+                  Ver serviços e preços
+                </a>
+              </div>
+            ) : (
+              <BookingPausedNotice
+                whatsappLink={whatsappLink}
+                phone={shop.phone}
+              />
+            )}
 
             {/* Prova social logo abaixo do botão, como nas páginas de
                 estabelecimento do Booksy e do Fresha. */}
@@ -275,12 +289,14 @@ export default async function LandingPage({
                           {barber.bio}
                         </p>
                       )}
-                      <Link
-                        href={href(`/reservas/nova?barberId=${barber.id}`)}
-                        className="mt-4 inline-block text-sm font-bold text-brand-400 transition-colors hover:text-brand-300"
-                      >
-                        Agendar com {barber.name.split(' ')[0]} →
-                      </Link>
+                      {bookingEnabled && (
+                        <Link
+                          href={href(`/reservas/nova?barberId=${barber.id}`)}
+                          className="mt-4 inline-block text-sm font-bold text-brand-400 transition-colors hover:text-brand-300"
+                        >
+                          Agendar com {barber.name.split(' ')[0]} →
+                        </Link>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -354,7 +370,7 @@ export default async function LandingPage({
         </section>
       </main>
 
-      <StickyBookingBar href={href('/reservas/nova')} />
+      {bookingEnabled && <StickyBookingBar href={href('/reservas/nova')} />}
 
       <footer className="border-t border-line px-4 pb-28 pt-10 sm:px-6 md:pb-10">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 text-center sm:flex-row sm:justify-between sm:text-left">
@@ -409,6 +425,45 @@ function aggregateRating(
     count += barber.reviewCount;
   }
   return count > 0 ? { value: sum / count, count } : null;
+}
+
+function BookingPausedNotice({
+  whatsappLink,
+  phone,
+}: {
+  whatsappLink: string | null;
+  phone: string | null;
+}) {
+  return (
+    <div className="mx-auto mt-9 max-w-md rounded-card border border-line-strong bg-surface-1 px-5 py-4 text-sm text-ink-muted">
+      <p className="font-display text-base font-bold text-ink">
+        Agendamento online indisponível no momento
+      </p>
+      <p className="mt-1">
+        Para marcar seu horário, fale direto com a barbearia.
+      </p>
+      <div className="mt-3 flex flex-col justify-center gap-2 sm:flex-row">
+        {whatsappLink && (
+          <a
+            href={whatsappLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-xl bg-success px-4 py-2.5 font-bold text-surface-0 transition-colors hover:bg-success-dim"
+          >
+            Chamar no WhatsApp
+          </a>
+        )}
+        {phone && (
+          <a
+            href={`tel:${phone.replace(/\D/g, '')}`}
+            className="rounded-xl border border-line-strong px-4 py-2.5 font-bold text-ink transition-colors hover:bg-surface-2"
+          >
+            Ligar
+          </a>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function SectionHeading({

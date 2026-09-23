@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  CreditCard,
   ExternalLink,
   KeyRound,
   LogOut,
@@ -16,12 +17,22 @@ import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { Field, Input, Select } from '@/components/ui/field';
+import { Checkbox, Field, Input, Select } from '@/components/ui/field';
 import { Modal } from '@/components/ui/modal';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SkeletonList } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { useAsyncData } from '@/lib/use-async-data';
+import { formatBRL, formatDate, todayISO } from '@/lib/format';
+import {
+  BILLING_STATUS,
+  BillingStatus,
+  BillingSummary,
+  INVOICE_STATUS,
+  InvoiceView,
+  PlanView,
+  planCapacity,
+} from '@/lib/billing';
 
 interface PlatformShop {
   id: string;
@@ -34,7 +45,20 @@ interface PlatformShop {
   barbers: number;
   clients: number;
   appointments: number;
+  billing: {
+    status: BillingStatus;
+    exempt: boolean;
+    plan: PlanView | null;
+    trialEndsAt: string | null;
+    nextAmount: string | null;
+    openInvoice: InvoiceView | null;
+  };
 }
+
+type Call = <T>(
+  path: string,
+  init?: { method?: string; body?: unknown },
+) => Promise<T>;
 
 interface CreatedShop {
   shop: { id: string; slug: string; name: string };
@@ -72,6 +96,8 @@ export default function PlatformPage() {
   const [keyDraft, setKeyDraft] = useState('');
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<CreatedShop | null>(null);
+  const [billingShop, setBillingShop] = useState<PlatformShop | null>(null);
+  const [plansOpen, setPlansOpen] = useState(false);
 
   const call = useCallback(
     <T,>(path: string, init: { method?: string; body?: unknown } = {}) =>
@@ -117,7 +143,9 @@ export default function PlatformPage() {
 
   const update = async (
     shop: PlatformShop,
-    patch: Partial<Pick<PlatformShop, 'isActive' | 'whatsappInstance' | 'slug'>>,
+    patch: Partial<
+      Pick<PlatformShop, 'isActive' | 'whatsappInstance' | 'slug'>
+    >,
     message: string,
   ): Promise<boolean> => {
     try {
@@ -212,7 +240,10 @@ export default function PlatformPage() {
         </div>
       </header>
 
-      <main id="conteudo" className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+      <main
+        id="conteudo"
+        className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6"
+      >
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="font-display text-2xl font-extrabold tracking-tight text-ink sm:text-3xl">
@@ -222,10 +253,16 @@ export default function PlatformPage() {
               Cada uma com equipe, clientes, agenda e endereço próprios.
             </p>
           </div>
-          <Button onClick={() => setCreating(true)}>
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            Nova barbearia
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => setPlansOpen(true)}>
+              <CreditCard className="h-4 w-4" aria-hidden="true" />
+              Planos e preços
+            </Button>
+            <Button onClick={() => setCreating(true)}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Nova barbearia
+            </Button>
+          </div>
         </div>
 
         {error && !keyRejected && (
@@ -255,12 +292,33 @@ export default function PlatformPage() {
           <ul className="space-y-3">
             {shops.map((shop) => (
               <li key={shop.id}>
-                <ShopRow shop={shop} onUpdate={update} />
+                <ShopRow
+                  shop={shop}
+                  onUpdate={update}
+                  onBilling={() => setBillingShop(shop)}
+                />
               </li>
             ))}
           </ul>
         )}
       </main>
+
+      {billingShop && (
+        <ShopBillingDialog
+          shop={billingShop}
+          call={call}
+          onClose={() => setBillingShop(null)}
+          onChanged={reload}
+        />
+      )}
+
+      {plansOpen && (
+        <PlansDialog
+          call={call}
+          onClose={() => setPlansOpen(false)}
+          onChanged={reload}
+        />
+      )}
 
       {creating && (
         <CreateShopDialog
@@ -307,11 +365,15 @@ export default function PlatformPage() {
 function ShopRow({
   shop,
   onUpdate,
+  onBilling,
 }: {
   shop: PlatformShop;
+  onBilling: () => void;
   onUpdate: (
     shop: PlatformShop,
-    patch: Partial<Pick<PlatformShop, 'isActive' | 'whatsappInstance' | 'slug'>>,
+    patch: Partial<
+      Pick<PlatformShop, 'isActive' | 'whatsappInstance' | 'slug'>
+    >,
     message: string,
   ) => Promise<boolean>;
 }) {
@@ -358,6 +420,7 @@ function ShopRow({
               .filter(Boolean)
               .join(' · ')}
           </p>
+          <BillingLine billing={shop.billing} />
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
@@ -375,7 +438,10 @@ function ShopRow({
             }}
           >
             <div className="w-52">
-              <Field label="Instância WhatsApp" hint="Vazio = número da plataforma">
+              <Field
+                label="Instância WhatsApp"
+                hint="Vazio = número da plataforma"
+              >
                 {(props) => (
                   <Input
                     {...props}
@@ -398,6 +464,16 @@ function ShopRow({
               Salvar
             </Button>
           </form>
+
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-10 sm:mb-[22px]"
+            onClick={onBilling}
+          >
+            <CreditCard className="h-4 w-4" aria-hidden="true" />
+            Assinatura
+          </Button>
 
           <Button
             variant={shop.isActive ? 'danger' : 'success'}
@@ -537,6 +613,13 @@ function CreateShopDialog({
   const [adminName, setAdminName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPhone, setAdminPhone] = useState('');
+  const [planCode, setPlanCode] = useState('solo');
+  const [trialDays, setTrialDays] = useState('14');
+  const fetchPlans = useCallback(
+    () => call<PlanView[]>('/platform/plans'),
+    [call],
+  );
+  const { data: plans } = useAsyncData(fetchPlans);
   const [saving, setSaving] = useState(false);
 
   // O endereço acompanha o nome até alguém editá-lo à mão.
@@ -556,6 +639,8 @@ function CreateShopDialog({
           adminName,
           adminEmail,
           adminPhone: adminPhone || undefined,
+          planCode,
+          trialDays: Math.max(0, Math.floor(Number(trialDays) || 0)),
         },
       });
       onCreated(result);
@@ -683,7 +768,503 @@ function CreateShopDialog({
             </Field>
           </div>
         </fieldset>
+
+        <fieldset className="rounded-xl border border-line p-4">
+          <legend className="px-1 text-xs font-bold uppercase tracking-wider text-ink-muted">
+            Mensalidade
+          </legend>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Plano">
+              {(props) => (
+                <Select
+                  {...props}
+                  value={planCode}
+                  onChange={(e) => setPlanCode(e.target.value)}
+                >
+                  {(plans ?? []).map((plan) => (
+                    <option key={plan.code} value={plan.code}>
+                      {plan.name} · {formatBRL(plan.monthlyPrice)} ·{' '}
+                      {planCapacity(plan, formatBRL)}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+            <Field label="Dias de teste grátis" hint="0 = cobra desde hoje">
+              {(props) => (
+                <Input
+                  {...props}
+                  type="number"
+                  min={0}
+                  max={365}
+                  value={trialDays}
+                  onChange={(e) => setTrialDays(e.target.value)}
+                />
+              )}
+            </Field>
+          </div>
+        </fieldset>
       </form>
+    </Modal>
+  );
+}
+
+/** Plano, situação e fatura aberta, numa linha abaixo dos números da barbearia. */
+function BillingLine({ billing }: { billing: PlatformShop['billing'] }) {
+  const status = BILLING_STATUS[billing.status];
+  const parts = [
+    billing.plan &&
+      `Plano ${billing.plan.name}${
+        !billing.exempt && billing.nextAmount
+          ? ` · ${formatBRL(billing.nextAmount)}/mês`
+          : ''
+      }`,
+    billing.status === 'TRIAL' &&
+      billing.trialEndsAt &&
+      `teste até ${formatDate(billing.trialEndsAt)}`,
+    billing.openInvoice &&
+      `fatura de ${formatBRL(billing.openInvoice.amount)} ${
+        billing.openInvoice.dueDate < todayISO() ? 'venceu' : 'vence'
+      } em ${formatDate(billing.openInvoice.dueDate)}`,
+  ].filter(Boolean);
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-muted">
+      <Badge tone={status.tone}>{status.label}</Badge>
+      <span>{parts.join(' · ')}</span>
+    </div>
+  );
+}
+
+/**
+ * Assinatura de uma barbearia: plano, cortesia, teste grátis e faturas, com
+ * baixa manual — o pagamento ainda é recebido por fora (Pix, transferência).
+ */
+function ShopBillingDialog({
+  shop,
+  call,
+  onClose,
+  onChanged,
+}: {
+  shop: PlatformShop;
+  call: Call;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const fetchSummary = useCallback(
+    () => call<BillingSummary>(`/platform/shops/${shop.id}/billing`),
+    [call, shop.id],
+  );
+  const { data, loading, reload } = useAsyncData(fetchSummary);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [trialDraft, setTrialDraft] = useState<string | null>(null);
+
+  const run = async (
+    key: string,
+    action: () => Promise<unknown>,
+    message: string,
+  ) => {
+    setBusy(key);
+    try {
+      await action();
+      toast.success(message);
+      reload();
+      onChanged();
+    } catch (caught) {
+      toast.error(
+        'Não foi possível salvar',
+        caught instanceof ApiError ? caught.message : undefined,
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const patchShop = (body: Record<string, unknown>) =>
+    call(`/platform/shops/${shop.id}`, { method: 'PATCH', body });
+  const setInvoice = (invoice: InvoiceView, status: InvoiceView['status']) =>
+    call(`/platform/invoices/${invoice.id}`, {
+      method: 'PATCH',
+      body: {
+        status,
+        ...(status === 'PAID'
+          ? { note: `Baixa manual em ${formatDate(todayISO())}` }
+          : {}),
+      },
+    });
+
+  const trialValue = trialDraft ?? data?.trialEndsAt ?? '';
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Assinatura · ${shop.name}`}
+      description="Sem operadora de pagamento: a barbearia paga por fora e você dá a baixa aqui."
+      size="lg"
+      footer={<Button onClick={onClose}>Fechar</Button>}
+    >
+      {loading && !data ? (
+        <SkeletonList count={2} className="h-24" />
+      ) : data ? (
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone={BILLING_STATUS[data.status].tone}>
+              {BILLING_STATUS[data.status].label}
+            </Badge>
+            <span className="text-sm text-ink-muted">
+              {data.activeBarbers}{' '}
+              {data.activeBarbers === 1
+                ? 'profissional ativo'
+                : 'profissionais ativos'}
+              {data.nextAmount && !data.exempt && (
+                <> · próxima fatura {formatBRL(data.nextAmount)}</>
+              )}
+            </span>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Plano"
+              hint="Precisa comportar a equipe ativa. Vale na próxima fatura."
+            >
+              {(props) => (
+                <Select
+                  {...props}
+                  value={data.plan?.code ?? ''}
+                  disabled={busy !== null}
+                  onChange={(e) =>
+                    void run(
+                      'plan',
+                      () => patchShop({ planCode: e.target.value }),
+                      'Plano alterado.',
+                    )
+                  }
+                >
+                  {data.plans.map((plan) => (
+                    <option
+                      key={plan.code}
+                      value={plan.code}
+                      disabled={!plan.fits}
+                    >
+                      {plan.name} · {formatBRL(plan.monthlyPrice)}
+                      {plan.fits ? '' : ' (não comporta a equipe)'}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+
+            <Field
+              label="Fim do teste grátis"
+              hint="Vazio encerra o teste. A primeira fatura vence nessa data."
+            >
+              {(props) => (
+                <div className="flex gap-2">
+                  <Input
+                    {...props}
+                    type="date"
+                    value={trialValue}
+                    onChange={(e) => setTrialDraft(e.target.value)}
+                  />
+                  <Button
+                    variant="secondary"
+                    className="h-12"
+                    disabled={
+                      busy !== null || trialValue === (data.trialEndsAt ?? '')
+                    }
+                    onClick={() =>
+                      void run(
+                        'trial',
+                        () => patchShop({ trialEndsAt: trialValue }),
+                        'Teste grátis atualizado.',
+                      ).then(() => setTrialDraft(null))
+                    }
+                  >
+                    Salvar
+                  </Button>
+                </div>
+              )}
+            </Field>
+          </div>
+
+          <Checkbox
+            label="Cortesia"
+            description="Sem mensalidade e sem limite de profissionais. Faturas já emitidas continuam como estão."
+            checked={data.exempt}
+            disabled={busy !== null}
+            onChange={(e) =>
+              void run(
+                'exempt',
+                () => patchShop({ billingExempt: e.target.checked }),
+                e.target.checked
+                  ? 'Barbearia em cortesia.'
+                  : 'Cortesia removida: a cobrança volta a valer.',
+              )
+            }
+          />
+
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="text-xs font-bold uppercase tracking-wider text-ink-muted">
+                Faturas
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={busy === 'generate'}
+                disabled={busy !== null || data.exempt}
+                onClick={() =>
+                  void run(
+                    'generate',
+                    () =>
+                      call(`/platform/shops/${shop.id}/invoices`, {
+                        method: 'POST',
+                      }),
+                    'Fatura gerada. O admin foi avisado no WhatsApp.',
+                  )
+                }
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                Gerar próxima fatura
+              </Button>
+            </div>
+
+            {data.invoices.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-line-strong px-4 py-6 text-center text-sm text-ink-muted">
+                Nenhuma fatura ainda. Elas são geradas sozinhas alguns dias
+                antes do vencimento.
+              </p>
+            ) : (
+              <ul className="divide-y divide-line rounded-xl border border-line">
+                {data.invoices.map((invoice) => (
+                  <li
+                    key={invoice.id}
+                    className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
+                  >
+                    <div className="min-w-0 text-sm">
+                      <p className="font-semibold tabular text-ink">
+                        {formatBRL(invoice.amount)} · vence{' '}
+                        {formatDate(invoice.dueDate)}
+                      </p>
+                      <p className="text-xs text-ink-subtle">
+                        {formatDate(invoice.periodStart)} a{' '}
+                        {formatDate(invoice.periodEnd)} · {invoice.planName} ·{' '}
+                        {invoice.barbers}{' '}
+                        {invoice.barbers === 1
+                          ? 'profissional'
+                          : 'profissionais'}
+                        {invoice.note ? ` · ${invoice.note}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge tone={INVOICE_STATUS[invoice.status].tone}>
+                        {INVOICE_STATUS[invoice.status].label}
+                      </Badge>
+                      {invoice.status === 'OPEN' ? (
+                        <>
+                          <Button
+                            variant="success"
+                            size="sm"
+                            loading={busy === `paid-${invoice.id}`}
+                            disabled={busy !== null}
+                            onClick={() =>
+                              void run(
+                                `paid-${invoice.id}`,
+                                () => setInvoice(invoice, 'PAID'),
+                                'Pagamento registrado.',
+                              )
+                            }
+                          >
+                            Marcar como paga
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busy !== null}
+                            onClick={() =>
+                              void run(
+                                `cancel-${invoice.id}`,
+                                () => setInvoice(invoice, 'CANCELED'),
+                                'Fatura cancelada.',
+                              )
+                            }
+                          >
+                            Cancelar
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={busy !== null}
+                          onClick={() =>
+                            void run(
+                              `reopen-${invoice.id}`,
+                              () => setInvoice(invoice, 'OPEN'),
+                              'Fatura reaberta.',
+                            )
+                          }
+                        >
+                          Reabrir
+                        </Button>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+/** Preços dos planos. Faturas já emitidas guardam o valor da época. */
+function PlansDialog({
+  call,
+  onClose,
+  onChanged,
+}: {
+  call: Call;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const fetchPlans = useCallback(
+    () => call<PlanView[]>('/platform/plans'),
+    [call],
+  );
+  const { data: plans, reload } = useAsyncData(fetchPlans);
+  const [drafts, setDrafts] = useState<
+    Record<string, { monthly: string; extra: string }>
+  >({});
+  const [saving, setSaving] = useState<string | null>(null);
+
+  const draftFor = (plan: PlanView) =>
+    drafts[plan.code] ?? {
+      monthly: plan.monthlyPrice,
+      extra: plan.extraBarberPrice ?? '',
+    };
+
+  const save = async (plan: PlanView) => {
+    const draft = draftFor(plan);
+    setSaving(plan.code);
+    try {
+      await call(`/platform/plans/${plan.code}`, {
+        method: 'PATCH',
+        body: {
+          monthlyPrice: Number(draft.monthly.replace(',', '.')),
+          ...(plan.maxBarbers === null && draft.extra !== ''
+            ? { extraBarberPrice: Number(draft.extra.replace(',', '.')) }
+            : {}),
+        },
+      });
+      toast.success(
+        `Preço do plano ${plan.name} salvo.`,
+        'Vale para as próximas faturas.',
+      );
+      setDrafts((current) => {
+        const next = { ...current };
+        delete next[plan.code];
+        return next;
+      });
+      reload();
+      onChanged();
+    } catch (caught) {
+      toast.error(
+        'Não foi possível salvar',
+        caught instanceof ApiError ? caught.message : undefined,
+      );
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Planos e preços"
+      description="Mudanças valem para as próximas faturas. As já emitidas guardam o valor da época."
+      size="lg"
+      footer={<Button onClick={onClose}>Fechar</Button>}
+    >
+      {!plans ? (
+        <SkeletonList count={3} className="h-16" />
+      ) : (
+        <ul className="divide-y divide-line rounded-xl border border-line">
+          {plans.map((plan) => {
+            const draft = draftFor(plan);
+            const dirty =
+              draft.monthly !== plan.monthlyPrice ||
+              draft.extra !== (plan.extraBarberPrice ?? '');
+            return (
+              <li
+                key={plan.code}
+                className="flex flex-wrap items-end gap-3 px-4 py-3"
+              >
+                <div className="min-w-40 flex-1">
+                  <p className="font-display font-bold text-ink">{plan.name}</p>
+                  <p className="text-xs text-ink-subtle">
+                    {planCapacity(plan, formatBRL)}
+                  </p>
+                </div>
+                <div className="w-32">
+                  <Field label="Mensal (R$)">
+                    {(props) => (
+                      <Input
+                        {...props}
+                        inputMode="decimal"
+                        className="h-10"
+                        value={draft.monthly}
+                        onChange={(e) =>
+                          setDrafts((current) => ({
+                            ...current,
+                            [plan.code]: { ...draft, monthly: e.target.value },
+                          }))
+                        }
+                      />
+                    )}
+                  </Field>
+                </div>
+                {plan.maxBarbers === null && (
+                  <div className="w-32">
+                    <Field label="Por extra (R$)">
+                      {(props) => (
+                        <Input
+                          {...props}
+                          inputMode="decimal"
+                          className="h-10"
+                          value={draft.extra}
+                          onChange={(e) =>
+                            setDrafts((current) => ({
+                              ...current,
+                              [plan.code]: { ...draft, extra: e.target.value },
+                            }))
+                          }
+                        />
+                      )}
+                    </Field>
+                  </div>
+                )}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-10"
+                  disabled={!dirty || saving !== null}
+                  loading={saving === plan.code}
+                  onClick={() => void save(plan)}
+                >
+                  Salvar
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </Modal>
   );
 }

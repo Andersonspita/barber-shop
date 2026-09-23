@@ -7,6 +7,11 @@ import { shopHref } from './shop-href';
 export interface ShopInfo {
   slug: string;
   name: string;
+  /** Agendamento pelo cliente liberado? Pausa com mensalidade atrasada. */
+  onlineBookingEnabled: boolean;
+  /** Contato para o cliente quando o agendamento online está pausado. */
+  whatsapp: string | null;
+  phone: string | null;
 }
 
 interface ShopContextValue extends ShopInfo {

@@ -91,4 +91,6 @@ export interface PublicShop {
   about: string | null;
   maxAdvanceDays: number;
   cancellationWindowMinutes: number;
+  /** Falso quando a mensalidade está atrasada além da tolerância. */
+  onlineBookingEnabled?: boolean;
 }

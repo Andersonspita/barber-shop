@@ -38,6 +38,7 @@ import { Card } from '@/components/ui/card';
 import { Avatar } from '@/components/ui/avatar';
 import { Field, Textarea } from '@/components/ui/field';
 import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/cn';
 import { useShop } from '@/lib/shop-context';
@@ -76,6 +77,7 @@ function NewBookingPage() {
   const params = useSearchParams();
   const toast = useToast();
   const { ready } = useSession('CLIENT');
+  const shop = useShop();
 
   const [chosenServiceId, setChosenServiceId] = useState('');
   const [barberId, setBarberId] = useState(params.get('barberId') ?? '');
@@ -183,6 +185,38 @@ function NewBookingPage() {
   };
 
   if (!ready) return null;
+
+  if (!shop.onlineBookingEnabled) {
+    return (
+      <>
+        <AppHeader
+          area="Portal do cliente"
+          subtitle="Novo agendamento"
+          items={CLIENT_NAV}
+        />
+        <main
+          id="conteudo"
+          className="mx-auto w-full max-w-xl px-4 py-12 sm:px-6"
+        >
+          <EmptyState
+            icon={<CalendarX2 className="h-6 w-6" aria-hidden="true" />}
+            title="Agendamento online indisponível no momento"
+            description={`Para marcar seu horário, fale direto com a ${shop.name}. Seus horários já marcados continuam valendo.`}
+            action={
+              shop.whatsapp ? (
+                <ButtonLink
+                  href={`https://wa.me/${shop.whatsapp.replace(/\D/g, '')}`}
+                  variant="success"
+                >
+                  Chamar no WhatsApp
+                </ButtonLink>
+              ) : undefined
+            }
+          />
+        </main>
+      </>
+    );
+  }
 
   if (confirmed) {
     return (

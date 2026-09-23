@@ -22,7 +22,15 @@ export default async function ShopLayout({
   if (!shop) notFound();
 
   return (
-    <ShopProvider shop={{ slug: shop.slug, name: shop.name }}>
+    <ShopProvider
+      shop={{
+        slug: shop.slug,
+        name: shop.name,
+        onlineBookingEnabled: shop.onlineBookingEnabled !== false,
+        whatsapp: shop.whatsapp,
+        phone: shop.phone,
+      }}
+    >
       {children}
     </ShopProvider>
   );

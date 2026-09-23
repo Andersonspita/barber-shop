@@ -3,6 +3,7 @@ import {
   CalendarCheck,
   CalendarDays,
   CalendarPlus,
+  CreditCard,
   Scissors,
   Settings,
   Store,
@@ -31,6 +32,7 @@ export const ADMIN_NAV: NavItem[] = [
   { href: '/dashboard/clientes', label: 'Clientes', icon: Users },
   { href: '/dashboard/equipe', label: 'Equipe', icon: Scissors },
   { href: '/dashboard/financeiro', label: 'Financeiro', icon: BarChart3 },
+  { href: '/dashboard/assinatura', label: 'Assinatura', icon: CreditCard },
   { href: '/dashboard/configuracoes', label: 'Minha conta', icon: Settings },
 ];
 

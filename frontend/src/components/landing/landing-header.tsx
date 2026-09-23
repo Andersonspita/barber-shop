@@ -18,8 +18,11 @@ const LINKS = [
 export function LandingHeader({
   shopName,
   basePath,
+  bookingEnabled = true,
 }: {
   shopName: string;
+  /** Falso com a mensalidade atrasada: some o botão de agendar. */
+  bookingEnabled?: boolean;
   /** `/<slug>` da barbearia; os links do menu são relativos a ele. */
   basePath: string;
 }) {
@@ -73,12 +76,14 @@ export function LandingHeader({
           >
             Entrar
           </Link>
-          <Link
-            href={`${basePath}/reservas/nova`}
-            className="rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-bold text-surface-0 transition-colors hover:bg-brand-400"
-          >
-            Agendar
-          </Link>
+          {bookingEnabled && (
+            <Link
+              href={`${basePath}/reservas/nova`}
+              className="rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-bold text-surface-0 transition-colors hover:bg-brand-400"
+            >
+              Agendar
+            </Link>
+          )}
           <button
             type="button"
             onClick={() => setOpen(true)}
@@ -136,12 +141,14 @@ export function LandingHeader({
               </li>
             </ul>
 
-            <Link
-              href={`${basePath}/reservas/nova`}
-              className="mt-auto rounded-xl bg-brand-500 px-4 py-3.5 text-center text-sm font-bold text-surface-0"
-            >
-              Agendar horário
-            </Link>
+            {bookingEnabled && (
+              <Link
+                href={`${basePath}/reservas/nova`}
+                className="mt-auto rounded-xl bg-brand-500 px-4 py-3.5 text-center text-sm font-bold text-surface-0"
+              >
+                Agendar horário
+              </Link>
+            )}
           </nav>
         </div>
       )}
