@@ -96,6 +96,7 @@ const RESERVED_SLUGS = new Set([
   'appointments',
   'auth',
   'barbers',
+  'billing',
   'dashboard',
   'icon',
   'login',

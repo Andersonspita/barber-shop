@@ -69,6 +69,19 @@ O [SDR-AI](https://github.com/Andersonspita/SDR-AI-BARBER-SHOP) prospecta barbea
 
 Teste ponta a ponta: `npm run test:e2e -- trial-provisioning` (Postgres e Redis reais).
 
+## Cobrança (Asaas)
+
+A mensalidade de cada barbearia é uma assinatura no [Asaas](https://www.asaas.com), com Pix, boleto ou cartão.
+
+- **Assinar:** o dono escolhe plano e forma de pagamento em **Painel → Assinatura**, e o link da 1ª fatura abre na hora. Para quem não consegue entrar no painel (teste vencido, suspensa), quem opera a plataforma usa **Gerar cobrança** em `/plataforma`, e o link vai no WhatsApp do dono. O CPF/CNPJ vai direto para o Asaas e não fica guardado aqui.
+- **Pagou** (`PAYMENT_RECEIVED`/`PAYMENT_CONFIRMED`): o plano ativa sozinho, e a barbearia volta ao ar se estava com o teste vencido ou suspensa.
+- **Venceu** (`PAYMENT_OVERDUE`): a barbearia fica `PAST_DUE`, ainda no ar, e o dono recebe o link da fatura. Passados `BILLING_GRACE_DAYS` dias sem pagamento, um job de hora em hora a suspende (`SUSPENDED`, fora do ar, sem apagar dados). O pagamento atrasado a reativa na hora.
+- **Ativar sem cobrança** em `/plataforma` continua disponível para pagamentos combinados por fora.
+
+Configuração: crie a chave de API no Asaas (`ASAAS_API_KEY`, **entre aspas simples** no `.env`, porque ela começa com `$` e o Docker Compose a apagaria; use `ASAAS_ENV=production` com chave de produção) e cadastre um webhook para `APP_URL/billing/asaas/webhook` com os eventos de cobrança e um token de autenticação, que vai também em `ASAAS_WEBHOOK_TOKEN`. Eventos repetidos são descartados pelo id.
+
+Preços dos planos: `backend/src/billing/plans.ts`. Teste ponta a ponta: `npm run test:e2e -- billing`.
+
 ## Configuração da agenda
 
 Tudo que define os horários fica no banco, por barbearia, editável em

@@ -9,7 +9,10 @@ export type TrialEvent =
   | 'trial.activated'
   | 'trial.expiring'
   | 'trial.expired'
-  | 'subscription.activated';
+  | 'subscription.activated'
+  | 'subscription.reactivated'
+  | 'subscription.past_due'
+  | 'subscription.suspended';
 
 /** Recorte da barbearia que o SDR-AI precisa para atualizar o lead. */
 export interface TrialShopSnapshot {

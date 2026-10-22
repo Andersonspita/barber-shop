@@ -23,9 +23,10 @@ import { SkeletonList } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { useAsyncData } from '@/lib/use-async-data';
 import {
-  ActivatePlanForm,
   PLAN_LABELS,
+  PlanControls,
   SubscriptionBadge,
+  type ChargeInput,
   type PlanCode,
   type SubscriptionStatus,
 } from '@/components/platform/subscription';
@@ -41,6 +42,9 @@ interface PlatformShop {
   plan: PlanCode | null;
   trialEndsAt: string | null;
   externalLeadId: string | null;
+  pendingPlan: PlanCode | null;
+  billingInvoiceUrl: string | null;
+  pastDueSince: string | null;
   createdAt: string;
   barbers: number;
   clients: number;
@@ -149,6 +153,31 @@ export default function PlatformPage() {
     } catch (caught) {
       toast.error(
         'Não foi possível salvar',
+        caught instanceof ApiError ? caught.message : undefined,
+      );
+      return false;
+    }
+  };
+
+  /** Gera a assinatura no Asaas; o link da fatura vai no WhatsApp do dono. */
+  const charge = async (
+    shop: PlatformShop,
+    input: ChargeInput,
+  ): Promise<boolean> => {
+    try {
+      await call(`/platform/shops/${shop.id}/billing`, {
+        method: 'POST',
+        body: input,
+      });
+      toast.success(
+        'Cobrança gerada',
+        `O link da fatura foi enviado no WhatsApp do dono da ${shop.name}.`,
+      );
+      reload();
+      return true;
+    } catch (caught) {
+      toast.error(
+        'Não foi possível gerar a cobrança',
         caught instanceof ApiError ? caught.message : undefined,
       );
       return false;
@@ -273,7 +302,7 @@ export default function PlatformPage() {
           <ul className="space-y-3">
             {shops.map((shop) => (
               <li key={shop.id}>
-                <ShopRow shop={shop} onUpdate={update} />
+                <ShopRow shop={shop} onUpdate={update} onCharge={charge} />
               </li>
             ))}
           </ul>
@@ -325,8 +354,10 @@ export default function PlatformPage() {
 function ShopRow({
   shop,
   onUpdate,
+  onCharge,
 }: {
   shop: PlatformShop;
+  onCharge: (shop: PlatformShop, input: ChargeInput) => Promise<boolean>;
   onUpdate: (
     shop: PlatformShop,
     patch: ShopPatch,
@@ -380,8 +411,9 @@ function ShopRow({
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <ActivatePlanForm
+          <PlanControls
             shop={shop}
+            onCharge={(input) => onCharge(shop, input)}
             onActivate={(plan) =>
               onUpdate(
                 shop,
