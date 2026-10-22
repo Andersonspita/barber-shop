@@ -15,18 +15,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ShopSettingsService } from '../shop/shop-settings.service';
 import { assertValidSlug } from '../common/shop-context';
 import { generateTemporaryPassword } from '../common/password.util';
+import { DEFAULT_SHIFTS } from '../common/default-schedule';
 import { PlatformGuard } from './platform.guard';
+import { SdrWebhookService } from '../trial/sdr-webhook.service';
 import { CreateShopDto, UpdateShopDto } from './dto';
-
-/** Jornada inicial do primeiro admin: seg-sex 09h-18h, sábado 09h-14h. */
-const DEFAULT_SHIFTS = [
-  ...[1, 2, 3, 4, 5].map((weekday) => ({
-    weekday,
-    startMinute: 9 * 60,
-    endMinute: 18 * 60,
-  })),
-  { weekday: 6, startMinute: 9 * 60, endMinute: 14 * 60 },
-];
 
 /**
  * Operação da plataforma: cadastrar barbearias, suspender e ligar o WhatsApp
@@ -40,6 +32,7 @@ export class PlatformController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly shops: ShopSettingsService,
+    private readonly webhooks: SdrWebhookService,
   ) {}
 
   @Get()
@@ -53,6 +46,11 @@ export class PlatformController {
         city: true,
         isActive: true,
         whatsappInstance: true,
+        subscriptionStatus: true,
+        plan: true,
+        trialEndsAt: true,
+        trialActivatedAt: true,
+        externalLeadId: true,
         createdAt: true,
         _count: { select: { appointments: true } },
       },
@@ -140,12 +138,21 @@ export class PlatformController {
       body.slug !== undefined ? assertValidSlug(body.slug) : undefined;
     if (slug && slug !== existing.slug) await this.assertSlugAvailable(slug);
 
+    // Ativar o plano de uma barbearia em teste ou vencida também a devolve ao
+    // ar, salvo se o mesmo pedido mandar suspender.
+    const activating =
+      body.subscriptionStatus === 'ACTIVE' &&
+      existing.subscriptionStatus !== 'ACTIVE';
+    const isActive = body.isActive ?? (activating ? true : undefined);
+
     const shop = await this.prisma.shop.update({
       where: { id },
       data: {
         ...(body.name !== undefined ? { name: body.name.trim() } : {}),
         ...(slug !== undefined ? { slug } : {}),
-        ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+        ...(isActive !== undefined ? { isActive } : {}),
+        ...(activating ? { subscriptionStatus: 'ACTIVE' as const } : {}),
+        ...(body.plan !== undefined ? { plan: body.plan } : {}),
         ...(body.whatsappInstance !== undefined
           ? { whatsappInstance: body.whatsappInstance.trim() || null }
           : {}),
@@ -156,11 +163,16 @@ export class PlatformController {
         name: true,
         isActive: true,
         whatsappInstance: true,
+        subscriptionStatus: true,
+        plan: true,
+        trialEndsAt: true,
+        externalLeadId: true,
       },
     });
 
     // Suspensão e troca de slug precisam valer já, não em 30 segundos.
     this.shops.forget(id);
+    if (activating) await this.webhooks.emit('subscription.activated', shop);
     return shop;
   }
 

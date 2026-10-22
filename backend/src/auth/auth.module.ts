@@ -4,6 +4,7 @@ import type { SignOptions } from 'jsonwebtoken';
 import { PassportModule } from '@nestjs/passport';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { TrialEventsModule } from '../trial/trial-events.module';
 import { WhatsappClient } from '../notifications/whatsapp.client';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -14,6 +15,7 @@ import { requireJwtSecret } from './jwt-secret.util';
   imports: [
     PrismaModule,
     NotificationsModule,
+    TrialEventsModule,
     PassportModule,
     JwtModule.register({
       secret: requireJwtSecret(),

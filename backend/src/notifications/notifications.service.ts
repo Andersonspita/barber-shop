@@ -14,7 +14,8 @@ export interface WhatsappJob {
     | 'cancellation'
     | 'reschedule'
     | 'waitlist'
-    | 'birthday';
+    | 'birthday'
+    | 'trial';
   /** Define por qual número de WhatsApp a mensagem sai. */
   shopId: string;
   to: string;
@@ -146,6 +147,11 @@ export class NotificationsService {
         `A equipe da ${settings.name} deseja um ótimo aniversário. ` +
         `Passa aqui essa semana para comemorar com o visual em dia.`,
     });
+  }
+
+  /** Avisos do teste grátis (vai vencer / venceu) para o dono da barbearia. */
+  async trialNotice(shopId: string, to: string, message: string) {
+    await this.enqueue({ kind: 'trial', shopId, to, message });
   }
 
   // ---------------------------------------------------------------- internos

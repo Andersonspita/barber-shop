@@ -101,6 +101,7 @@ const RESERVED_SLUGS = new Set([
   'login',
   'plataforma',
   'platform',
+  'provisioning',
   'reservas',
   'schedule-blocks',
   'services',
@@ -108,6 +109,11 @@ const RESERVED_SLUGS = new Set([
   'shops',
   'waitlist',
 ]);
+
+/** Versão sem exceção de `assertValidSlug`, para quem gera slugs candidatos. */
+export function isValidSlug(slug: string): boolean {
+  return SLUG_PATTERN.test(slug) && !RESERVED_SLUGS.has(slug);
+}
 
 export function assertValidSlug(slug: string): string {
   const normalized = slug.trim().toLowerCase();

@@ -12,6 +12,22 @@ enum Role {
   ADMIN
 }
 
+/// Situação comercial da barbearia. Instalações antigas e barbearias criadas
+/// pela plataforma nascem ACTIVE; as provisionadas pelo SDR-AI nascem TRIAL.
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  EXPIRED
+}
+
+/// Matriz de planos do Gerente Barber, por número de cadeiras.
+enum Plan {
+  SOLO
+  SQUAD
+  PRO
+  EMPIRE
+}
+
 enum AppointmentStatus {
   SCHEDULED
   COMPLETED
@@ -203,6 +219,17 @@ model Shop {
   /// Instância da Evolution API com o número de WhatsApp desta barbearia.
   /// Vazia, as mensagens saem pela instância padrão da plataforma.
   whatsappInstance          String?
+  subscriptionStatus        SubscriptionStatus @default(ACTIVE)
+  plan                      Plan?
+  /// Fim do teste grátis. Vencido, um job tira a barbearia do ar (EXPIRED).
+  trialEndsAt               DateTime?
+  /// Primeira vez que o dono entrou (definiu a senha ou fez login).
+  trialActivatedAt          DateTime?
+  /// Aviso de "seu teste acaba em breve" já enviado, para não repetir.
+  trialReminderSentAt       DateTime?
+  /// Lead do SDR-AI que originou a barbearia. Único: o provisionamento
+  /// repetido para o mesmo lead devolve a barbearia que já existe.
+  externalLeadId            String?  @unique
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
@@ -212,6 +239,7 @@ model Shop {
   holidays        Holiday[]
   waitlistEntries WaitlistEntry[]
 
+  @@index([subscriptionStatus, trialEndsAt])
   @@map("shops")
 }
 
