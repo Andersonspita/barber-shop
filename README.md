@@ -58,6 +58,17 @@ do site (`APP_URL/reservas`, `APP_URL/login`) passam a dar 404; divulgue o novo
 endereço. O slug pode ser trocado em `/plataforma`, em **Alterar endereço** —
 o endereço antigo deixa de funcionar na hora.
 
+## Teste grátis pelo SDR-AI
+
+O [SDR-AI](https://github.com/Andersonspita/SDR-AI-BARBER-SHOP) prospecta barbearias no WhatsApp e, quando o dono topa, cria a barbearia dele aqui já em **teste grátis**:
+
+- `POST /provisioning/trials` com o cabeçalho `X-Provisioning-Key` (`PROVISIONING_API_KEY`). É uma chave separada da `PLATFORM_ADMIN_KEY`: ela só cria testes. A barbearia nasce com o dono (que define a senha por um link de uso único válido por `TRIAL_SETUP_LINK_TTL_HOURS`), a jornada padrão e os serviços Corte, Barba e Combo. O pedido é idempotente pelo lead, e um endereço em uso ganha sufixo (`-2`, `-3`...).
+- Um job de hora em hora avisa o dono no WhatsApp 48h antes do fim e, no vencimento, tira a barbearia do ar (`EXPIRED`) sem apagar nada.
+- Em `/plataforma`, **Ativar plano** converte o teste (ou um teste vencido) e devolve a barbearia ao ar.
+- Cada etapa (`trial.activated`, `trial.expiring`, `trial.expired`, `subscription.activated`) é enviada ao SDR em `SDR_WEBHOOK_URL`, assinada com HMAC-SHA256 (`SDR_WEBHOOK_SECRET`) e com novas tentativas pela fila.
+
+Teste ponta a ponta: `npm run test:e2e -- trial-provisioning` (Postgres e Redis reais).
+
 ## Configuração da agenda
 
 Tudo que define os horários fica no banco, por barbearia, editável em

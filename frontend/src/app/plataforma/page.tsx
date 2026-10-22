@@ -22,6 +22,13 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { SkeletonList } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { useAsyncData } from '@/lib/use-async-data';
+import {
+  ActivatePlanForm,
+  PLAN_LABELS,
+  SubscriptionBadge,
+  type PlanCode,
+  type SubscriptionStatus,
+} from '@/components/platform/subscription';
 
 interface PlatformShop {
   id: string;
@@ -30,11 +37,22 @@ interface PlatformShop {
   city: string | null;
   isActive: boolean;
   whatsappInstance: string | null;
+  subscriptionStatus: SubscriptionStatus;
+  plan: PlanCode | null;
+  trialEndsAt: string | null;
+  externalLeadId: string | null;
   createdAt: string;
   barbers: number;
   clients: number;
   appointments: number;
 }
+
+type ShopPatch = Partial<
+  Pick<
+    PlatformShop,
+    'isActive' | 'whatsappInstance' | 'slug' | 'subscriptionStatus' | 'plan'
+  >
+>;
 
 interface CreatedShop {
   shop: { id: string; slug: string; name: string };
@@ -117,7 +135,7 @@ export default function PlatformPage() {
 
   const update = async (
     shop: PlatformShop,
-    patch: Partial<Pick<PlatformShop, 'isActive' | 'whatsappInstance' | 'slug'>>,
+    patch: ShopPatch,
     message: string,
   ): Promise<boolean> => {
     try {
@@ -311,7 +329,7 @@ function ShopRow({
   shop: PlatformShop;
   onUpdate: (
     shop: PlatformShop,
-    patch: Partial<Pick<PlatformShop, 'isActive' | 'whatsappInstance' | 'slug'>>,
+    patch: ShopPatch,
     message: string,
   ) => Promise<boolean>;
 }) {
@@ -330,6 +348,7 @@ function ShopRow({
             <Badge tone={shop.isActive ? 'success' : 'danger'}>
               {shop.isActive ? 'Ativa' : 'Suspensa'}
             </Badge>
+            <SubscriptionBadge shop={shop} />
           </div>
           <a
             href={`/${shop.slug}`}
@@ -361,6 +380,16 @@ function ShopRow({
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <ActivatePlanForm
+            shop={shop}
+            onActivate={(plan) =>
+              onUpdate(
+                shop,
+                { subscriptionStatus: 'ACTIVE', plan },
+                `${shop.name} agora está no plano ${PLAN_LABELS[plan]}.`,
+              )
+            }
+          />
           <form
             className="flex items-end gap-2"
             onSubmit={(event) => {

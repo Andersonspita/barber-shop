@@ -53,6 +53,11 @@ services:
       # chave do painel /plataforma (vazia = painel desligado).
       DEFAULT_SHOP_SLUG: ${DEFAULT_SHOP_SLUG:-}
       PLATFORM_ADMIN_KEY: ${PLATFORM_ADMIN_KEY:-}
+      # Teste grátis provisionado pelo SDR-AI (chave própria) e avisos de volta.
+      PROVISIONING_API_KEY: ${PROVISIONING_API_KEY:-}
+      SDR_WEBHOOK_URL: ${SDR_WEBHOOK_URL:-}
+      SDR_WEBHOOK_SECRET: ${SDR_WEBHOOK_SECRET:-}
+      TRIAL_SETUP_LINK_TTL_HOURS: ${TRIAL_SETUP_LINK_TTL_HOURS:-72}
       # O fuso da barbearia fica no banco (configurável na tela de ajustes),
       # não aqui: o motor de agenda não depende mais do relógio do contêiner.
       TZ: UTC

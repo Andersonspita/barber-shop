@@ -6,11 +6,11 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { createHash, randomBytes } from 'node:crypto';
-import { addMinutes } from 'date-fns';
 import { User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappClient } from '../notifications/whatsapp.client';
+import { TrialActivationService } from '../trial/trial-activation.service';
+import { createPasswordSetupLink, hashResetToken } from './password-setup.util';
 
 const SALT_ROUNDS = 10;
 const RESET_TOKEN_TTL_MINUTES = 30;
@@ -18,14 +18,12 @@ const RESET_TOKEN_TTL_MINUTES = 30;
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  private readonly appUrl = (
-    process.env.APP_URL ?? 'http://localhost:3000'
-  ).replace(/\/+$/, '');
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly whatsapp: WhatsappClient,
+    private readonly trialActivation: TrialActivationService,
   ) {}
 
   /**
@@ -51,6 +49,7 @@ export class AuthService {
       );
     }
 
+    await this.trialActivation.markActivated(user.id);
     return this.session(user);
   }
 
@@ -127,19 +126,14 @@ export class AuthService {
     });
     if (!user || !user.isActive) return genericResponse;
 
-    const token = randomBytes(32).toString('hex');
-
-    await this.prisma.passwordResetToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: hashToken(token),
-        expiresAt: addMinutes(new Date(), RESET_TOKEN_TTL_MINUTES),
-      },
-    });
-
     // O link leva à página da barbearia, para que o "entrar" depois da troca
     // de senha já caia no login certo.
-    const link = `${this.appUrl}/${user.shop.slug}/login/recuperar?token=${token}`;
+    const link = await createPasswordSetupLink(
+      this.prisma,
+      user.id,
+      user.shop.slug,
+      RESET_TOKEN_TTL_MINUTES,
+    );
 
     if (user.phoneNumber) {
       await this.whatsapp
@@ -164,7 +158,7 @@ export class AuthService {
 
   async resetPassword(token: string, newPass: string) {
     const record = await this.prisma.passwordResetToken.findUnique({
-      where: { tokenHash: hashToken(token) },
+      where: { tokenHash: hashResetToken(token) },
       include: { user: true },
     });
 
@@ -192,6 +186,8 @@ export class AuthService {
       }),
     ]);
 
+    // Dono de barbearia em teste definindo a senha pelo link do SDR: é o primeiro acesso.
+    await this.trialActivation.markActivated(record.userId);
     return { message: 'Senha redefinida. Faça login com a nova senha.' };
   }
 
@@ -266,10 +262,6 @@ export class AuthService {
       },
     };
   }
-}
-
-function hashToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
 }
 
 function parseBirthDate(value?: string): Date | null {

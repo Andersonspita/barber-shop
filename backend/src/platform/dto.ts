@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
+  IsIn,
   IsEmail,
   IsOptional,
   IsString,
@@ -66,6 +67,15 @@ export class UpdateShopDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  /** Ativar o plano de uma barbearia em teste ou vencida (conversão manual). */
+  @IsOptional()
+  @IsIn(['ACTIVE'])
+  subscriptionStatus?: 'ACTIVE';
+
+  @IsOptional()
+  @IsIn(['SOLO', 'SQUAD', 'PRO', 'EMPIRE'])
+  plan?: 'SOLO' | 'SQUAD' | 'PRO' | 'EMPIRE';
 
   /** Instância da Evolution API; string vazia volta para a padrão. */
   @IsOptional()
