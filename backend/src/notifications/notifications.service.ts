@@ -15,7 +15,8 @@ export interface WhatsappJob {
     | 'reschedule'
     | 'waitlist'
     | 'birthday'
-    | 'trial';
+    | 'trial'
+    | 'billing';
   /** Define por qual número de WhatsApp a mensagem sai. */
   shopId: string;
   to: string;
@@ -152,6 +153,11 @@ export class NotificationsService {
   /** Avisos do teste grátis (vai vencer / venceu) para o dono da barbearia. */
   async trialNotice(shopId: string, to: string, message: string) {
     await this.enqueue({ kind: 'trial', shopId, to, message });
+  }
+
+  /** Avisos de cobrança (fatura, vencimento, suspensão) para o dono. */
+  async billingNotice(shopId: string, to: string, message: string) {
+    await this.enqueue({ kind: 'billing', shopId, to, message });
   }
 
   // ---------------------------------------------------------------- internos

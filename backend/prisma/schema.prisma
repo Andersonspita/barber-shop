@@ -18,6 +18,17 @@ enum SubscriptionStatus {
   TRIAL
   ACTIVE
   EXPIRED
+  /// Mensalidade vencida e não paga; ainda no ar durante a tolerância.
+  PAST_DUE
+  /// Tolerância esgotada sem pagamento: fora do ar até pagar.
+  SUSPENDED
+}
+
+/// Forma de pagamento da assinatura no Asaas.
+enum BillingMethod {
+  PIX
+  BOLETO
+  CREDIT_CARD
 }
 
 /// Matriz de planos do Gerente Barber, por número de cadeiras.
@@ -230,6 +241,15 @@ model Shop {
   /// Lead do SDR-AI que originou a barbearia. Único: o provisionamento
   /// repetido para o mesmo lead devolve a barbearia que já existe.
   externalLeadId            String?  @unique
+  /// Plano escolhido na assinatura, aplicado quando o 1º pagamento cair.
+  pendingPlan               Plan?
+  billingMethod             BillingMethod?
+  asaasCustomerId           String?  @unique
+  asaasSubscriptionId       String?  @unique
+  /// Fatura em aberto (primeira cobrança ou mensalidade vencida).
+  billingInvoiceUrl         String?
+  /// Desde quando a mensalidade está vencida; base da suspensão.
+  pastDueSince              DateTime?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
@@ -240,7 +260,19 @@ model Shop {
   waitlistEntries WaitlistEntry[]
 
   @@index([subscriptionStatus, trialEndsAt])
+  @@index([subscriptionStatus, pastDueSince])
   @@map("shops")
+}
+
+/// Eventos de webhook do Asaas já processados. A entrega é "pelo menos uma
+/// vez": o id do evento impede que um reenvio ative ou suspenda de novo.
+model BillingEvent {
+  id         String   @id
+  event      String
+  paymentId  String?
+  receivedAt DateTime @default(now())
+
+  @@map("billing_events")
 }
 
 model PasswordResetToken {

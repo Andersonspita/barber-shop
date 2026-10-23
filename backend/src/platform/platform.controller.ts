@@ -18,6 +18,8 @@ import { generateTemporaryPassword } from '../common/password.util';
 import { DEFAULT_SHIFTS } from '../common/default-schedule';
 import { PlatformGuard } from './platform.guard';
 import { SdrWebhookService } from '../trial/sdr-webhook.service';
+import { BillingService } from '../billing/billing.service';
+import { SubscribeDto } from '../billing/dto';
 import { CreateShopDto, UpdateShopDto } from './dto';
 
 /**
@@ -33,6 +35,7 @@ export class PlatformController {
     private readonly prisma: PrismaService,
     private readonly shops: ShopSettingsService,
     private readonly webhooks: SdrWebhookService,
+    private readonly billing: BillingService,
   ) {}
 
   @Get()
@@ -51,6 +54,9 @@ export class PlatformController {
         trialEndsAt: true,
         trialActivatedAt: true,
         externalLeadId: true,
+        pendingPlan: true,
+        billingInvoiceUrl: true,
+        pastDueSince: true,
         createdAt: true,
         _count: { select: { appointments: true } },
       },
@@ -151,7 +157,9 @@ export class PlatformController {
         ...(body.name !== undefined ? { name: body.name.trim() } : {}),
         ...(slug !== undefined ? { slug } : {}),
         ...(isActive !== undefined ? { isActive } : {}),
-        ...(activating ? { subscriptionStatus: 'ACTIVE' as const } : {}),
+        ...(activating
+          ? { subscriptionStatus: 'ACTIVE' as const, pastDueSince: null }
+          : {}),
         ...(body.plan !== undefined ? { plan: body.plan } : {}),
         ...(body.whatsappInstance !== undefined
           ? { whatsappInstance: body.whatsappInstance.trim() || null }
@@ -174,6 +182,20 @@ export class PlatformController {
     this.shops.forget(id);
     if (activating) await this.webhooks.emit('subscription.activated', shop);
     return shop;
+  }
+
+  /**
+   * Gera a assinatura no Asaas e manda o link da 1ª fatura no WhatsApp do
+   * dono — para quem não consegue entrar no painel (teste vencido, suspensa).
+   */
+  @Post(':id/billing')
+  async createBilling(@Param('id') id: string, @Body() body: SubscribeDto) {
+    const exists = await this.prisma.shop.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!exists) throw new NotFoundException('Barbearia não encontrada.');
+    return this.billing.subscribe(id, body, { notifyOwner: true });
   }
 
   private async assertSlugAvailable(slug: string) {

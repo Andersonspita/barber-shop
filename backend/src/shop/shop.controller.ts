@@ -105,9 +105,19 @@ export class ShopController {
  * A instância de WhatsApp é configurada pela plataforma, não pelo admin da
  * barbearia, então não sai no painel dele.
  */
-function withoutInternals(shop: Shop): Omit<Shop, 'whatsappInstance'> {
-  const { whatsappInstance, ...rest } = shop;
+/** Remove o que é da operação da plataforma (WhatsApp, Asaas, origem no SDR). */
+function withoutInternals(shop: Shop) {
+  const {
+    whatsappInstance,
+    asaasCustomerId,
+    asaasSubscriptionId,
+    externalLeadId,
+    ...rest
+  } = shop;
   void whatsappInstance;
+  void asaasCustomerId;
+  void asaasSubscriptionId;
+  void externalLeadId;
   return rest;
 }
 

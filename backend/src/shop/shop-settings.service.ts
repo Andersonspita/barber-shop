@@ -8,7 +8,24 @@ const CACHE_TTL_MS = 30_000;
 export type ShopSettingsUpdate = Partial<
   Omit<
     Shop,
-    'id' | 'slug' | 'isActive' | 'whatsappInstance' | 'createdAt' | 'updatedAt'
+    | 'id'
+    | 'slug'
+    | 'isActive'
+    | 'whatsappInstance'
+    | 'createdAt'
+    | 'updatedAt'
+    | 'subscriptionStatus'
+    | 'plan'
+    | 'pendingPlan'
+    | 'billingMethod'
+    | 'asaasCustomerId'
+    | 'asaasSubscriptionId'
+    | 'billingInvoiceUrl'
+    | 'pastDueSince'
+    | 'trialEndsAt'
+    | 'trialActivatedAt'
+    | 'trialReminderSentAt'
+    | 'externalLeadId'
   >
 >;
 
