@@ -58,12 +58,16 @@ services:
       SDR_WEBHOOK_URL: ${SDR_WEBHOOK_URL:-}
       SDR_WEBHOOK_SECRET: ${SDR_WEBHOOK_SECRET:-}
       TRIAL_SETUP_LINK_TTL_HOURS: ${TRIAL_SETUP_LINK_TTL_HOURS:-72}
-      # Cobrança recorrente (Asaas). ASAAS_API_URL só para apontar a um ambiente de teste.
+      # Mensalidade: teste grátis, tolerância, antecedência da fatura e como pagar.
+      BILLING_TRIAL_DAYS: ${BILLING_TRIAL_DAYS:-14}
+      BILLING_GRACE_DAYS: ${BILLING_GRACE_DAYS:-7}
+      BILLING_INVOICE_DAYS_BEFORE: ${BILLING_INVOICE_DAYS_BEFORE:-5}
+      BILLING_PAYMENT_INSTRUCTIONS: ${BILLING_PAYMENT_INSTRUCTIONS:-}
+      # Pagamento online das faturas pelo Asaas (opcional). ASAAS_API_URL só para testes.
       ASAAS_ENV: ${ASAAS_ENV:-sandbox}
       ASAAS_API_KEY: ${ASAAS_API_KEY:-}
       ASAAS_API_URL: ${ASAAS_API_URL:-}
       ASAAS_WEBHOOK_TOKEN: ${ASAAS_WEBHOOK_TOKEN:-}
-      BILLING_GRACE_DAYS: ${BILLING_GRACE_DAYS:-5}
       # O fuso da barbearia fica no banco (configurável na tela de ajustes),
       # não aqui: o motor de agenda não depende mais do relógio do contêiner.
       TZ: UTC

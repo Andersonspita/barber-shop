@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { BillingMethod } from '@prisma/client';
 
 const BASE_URLS = {
   sandbox: 'https://api-sandbox.asaas.com/v3',
@@ -22,7 +21,7 @@ export interface AsaasPayment {
   value: number;
   dueDate: string;
   invoiceUrl?: string | null;
-  subscription?: string | null;
+  externalReference?: string | null;
 }
 
 /**
@@ -63,40 +62,30 @@ export class AsaasClient {
     });
   }
 
-  async createSubscription(input: {
+  /**
+   * Cobrança avulsa de uma fatura (Pix, boleto ou cartão). O `externalReference`
+   * é o id da fatura: o webhook de pagamento volta com ele.
+   */
+  async createPayment(input: {
     customer: string;
-    billingType: BillingMethod;
+    /** UNDEFINED = quem paga escolhe Pix, boleto ou cartão na página da fatura. */
+    billingType: 'UNDEFINED' | 'PIX' | 'BOLETO' | 'CREDIT_CARD';
     value: number;
-    nextDueDate: string;
+    dueDate: string;
     description: string;
     externalReference: string;
-  }): Promise<{ id: string }> {
-    return this.request('POST', '/subscriptions', {
-      ...input,
-      cycle: 'MONTHLY',
-    });
+  }): Promise<AsaasPayment> {
+    return this.request('POST', '/payments', input);
   }
 
-  /** Cancela a assinatura. Já removida no Asaas (404) conta como sucesso. */
-  async deleteSubscription(id: string): Promise<void> {
+  /** Cancela a cobrança (fatura baixada por fora ou cancelada). 404 conta como sucesso. */
+  async deletePayment(id: string): Promise<void> {
     try {
-      await this.request('DELETE', `/subscriptions/${encodeURIComponent(id)}`);
+      await this.request('DELETE', `/payments/${encodeURIComponent(id)}`);
     } catch (error) {
       if (error instanceof AsaasError && error.status === 404) return;
       throw error;
     }
-  }
-
-  /** Primeira cobrança em aberto da assinatura (a que o dono precisa pagar). */
-  async pendingPayment(subscriptionId: string): Promise<AsaasPayment | null> {
-    const page = await this.request<{ data: AsaasPayment[] }>(
-      'GET',
-      `/subscriptions/${encodeURIComponent(subscriptionId)}/payments`,
-    );
-    return (
-      page.data.find((p) => p.status === 'PENDING' || p.status === 'OVERDUE') ??
-      null
-    );
   }
 
   private async request<T>(

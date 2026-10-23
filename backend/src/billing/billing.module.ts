@@ -1,18 +1,25 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { TrialEventsModule } from '../trial/trial-events.module';
 import { AsaasClient } from './asaas.client';
-import { BillingController } from './billing.controller';
 import { BillingService } from './billing.service';
 import {
+  AsaasWebhookController,
+  BillingController,
+} from './billing.controller';
+import {
   BILLING_QUEUE,
-  BillingLifecycleProcessor,
+  BillingProcessor,
   BillingScheduler,
-} from './billing-lifecycle.processor';
+} from './billing.processor';
 
-/** Cobrança recorrente pelo Asaas: assinatura, webhook e inadimplência. */
+/**
+ * Global porque o limite de profissionais, a pausa do agendamento e a
+ * plataforma consultam a cobrança de módulos diferentes.
+ */
+@Global()
 @Module({
   imports: [
     PrismaModule,
@@ -20,13 +27,8 @@ import {
     TrialEventsModule,
     BullModule.registerQueue({ name: BILLING_QUEUE }),
   ],
-  controllers: [BillingController],
-  providers: [
-    AsaasClient,
-    BillingService,
-    BillingScheduler,
-    BillingLifecycleProcessor,
-  ],
+  controllers: [BillingController, AsaasWebhookController],
+  providers: [AsaasClient, BillingService, BillingScheduler, BillingProcessor],
   exports: [BillingService],
 })
 export class BillingModule {}

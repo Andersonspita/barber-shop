@@ -1,16 +1,25 @@
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { Prisma, Shop } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import { addDays } from 'date-fns';
 import { PrismaService } from '../prisma/prisma.service';
 import { isValidSlug } from '../common/shop-context';
 import { generateTemporaryPassword } from '../common/password.util';
 import { DEFAULT_SHIFTS } from '../common/default-schedule';
 import { createPasswordSetupLink } from '../auth/password-setup.util';
+import { BillingService } from '../billing/billing.service';
 import { CreateTrialDto } from './dto';
 
 const DEFAULT_TRIAL_DAYS = 7;
 const MAX_SLUG_SUFFIX = 9;
+const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
+
+/** Códigos de plano que o SDR usava antes da tabela de planos. */
+const LEGACY_PLAN_CODES: Record<string, string> = {
+  SOLO: 'solo',
+  SQUAD: 'essencial',
+  PRO: 'profissional',
+  EMPIRE: 'premium',
+};
 
 /**
  * Cardápio inicial: o SDR promete uma vitrine "pronta para testar hoje", e uma
@@ -75,6 +84,7 @@ export interface ProvisionedTrial {
     slug: string;
     name: string;
     url: string;
+    /** Sempre TRIAL na criação; a situação real vem da cobrança. */
     subscriptionStatus: string;
     plan: string | null;
     trialEndsAt: string | null;
@@ -88,7 +98,10 @@ export interface ProvisionedTrial {
 export class TrialProvisioningService {
   private readonly logger = new Logger(TrialProvisioningService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly billing: BillingService,
+  ) {}
 
   /**
    * Cria a barbearia em teste grátis com o primeiro admin, jornada e serviços.
@@ -132,6 +145,11 @@ export class TrialProvisioningService {
   private async create(slug: string, input: CreateTrialDto): Promise<Shop> {
     // O dono nunca vê esta senha: ele cria a própria pelo link de acesso.
     const passwordHash = await bcrypt.hash(generateTemporaryPassword(16), 10);
+    const planCode = await this.resolvePlanCode(input.plan);
+    const trialEndsAt = this.billing.trialEndFor(
+      DEFAULT_TIMEZONE,
+      input.trialDays ?? DEFAULT_TRIAL_DAYS,
+    );
 
     return this.prisma.$transaction(async (tx) => {
       const shop = await tx.shop.create({
@@ -141,12 +159,9 @@ export class TrialProvisioningService {
           city: input.city || null,
           phone: input.adminPhone,
           whatsapp: input.adminPhone,
-          subscriptionStatus: 'TRIAL',
-          plan: input.plan ?? 'SOLO',
-          trialEndsAt: addDays(
-            new Date(),
-            input.trialDays ?? DEFAULT_TRIAL_DAYS,
-          ),
+          timezone: DEFAULT_TIMEZONE,
+          planCode,
+          trialEndsAt,
           externalLeadId: input.externalLeadId,
         },
       });
@@ -180,6 +195,21 @@ export class TrialProvisioningService {
     });
   }
 
+  /** Plano pedido pelo SDR (código novo ou antigo); senão, o menor da tabela. */
+  private async resolvePlanCode(requested?: string): Promise<string | null> {
+    const plans = await this.prisma.plan.findMany({
+      where: { isActive: true },
+      orderBy: { sortOrder: 'asc' },
+      select: { code: true },
+    });
+    const wanted = requested
+      ? (LEGACY_PLAN_CODES[requested.toUpperCase()] ?? requested.toLowerCase())
+      : null;
+    return (
+      plans.find((plan) => plan.code === wanted)?.code ?? plans[0]?.code ?? null
+    );
+  }
+
   private async describe(
     shop: Shop,
     created: boolean,
@@ -209,8 +239,8 @@ export class TrialProvisioningService {
         slug: shop.slug,
         name: shop.name,
         url: `${appUrl()}/${shop.slug}`,
-        subscriptionStatus: shop.subscriptionStatus,
-        plan: shop.plan,
+        subscriptionStatus: await this.billing.status(shop.id),
+        plan: shop.planCode,
         trialEndsAt: shop.trialEndsAt ? shop.trialEndsAt.toISOString() : null,
       },
       admin: admin ? { id: admin.id, email: admin.email } : null,

@@ -1,7 +1,6 @@
 import { Transform } from 'class-transformer';
 import {
   IsEmail,
-  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -11,9 +10,6 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-
-export const PLANS = ['SOLO', 'SQUAD', 'PRO', 'EMPIRE'] as const;
-export type PlanCode = (typeof PLANS)[number];
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -46,9 +42,14 @@ export class CreateTrialDto {
   @MaxLength(120)
   city?: string;
 
+  /**
+   * Plano da tabela (`solo`, `essencial`...). Aceita também os códigos antigos
+   * do SDR (SOLO, SQUAD, PRO, EMPIRE). Vazio ou desconhecido = menor plano.
+   */
   @IsOptional()
-  @IsIn(PLANS)
-  plan?: PlanCode;
+  @IsString()
+  @MaxLength(40)
+  plan?: string;
 
   @IsOptional()
   @IsInt()
