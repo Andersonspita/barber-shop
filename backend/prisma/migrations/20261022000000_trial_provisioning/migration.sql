@@ -9,7 +9,8 @@ CREATE TYPE "Plan" AS ENUM ('SOLO', 'SQUAD', 'PRO', 'EMPIRE');
 ALTER TABLE "shops"
   ADD COLUMN "subscriptionStatus" "SubscriptionStatus" NOT NULL DEFAULT 'ACTIVE',
   ADD COLUMN "plan" "Plan",
-  ADD COLUMN "trialEndsAt" TIMESTAMP(3),
+  -- trialEndsAt já pode existir (criada pela migração da mensalidade, 20260923).
+  ADD COLUMN IF NOT EXISTS "trialEndsAt" TIMESTAMP(3),
   ADD COLUMN "trialActivatedAt" TIMESTAMP(3),
   ADD COLUMN "trialReminderSentAt" TIMESTAMP(3),
   ADD COLUMN "externalLeadId" TEXT;

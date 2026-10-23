@@ -37,6 +37,7 @@ import { useToast } from '@/components/ui/toast';
 import { RescheduleForm } from '@/components/reschedule-form';
 import { BlockScheduleDialog } from '@/components/block-schedule-dialog';
 import { WalkInDialog } from '@/components/walk-in-dialog';
+import { BillingBanner } from '@/components/billing-banner';
 import { cn } from '@/lib/cn';
 
 interface Appointment {
@@ -174,6 +175,8 @@ export default function DashboardPage() {
             </>
           }
         />
+
+        {user.isAdmin && <BillingBanner />}
 
         {error && error.status !== 401 && (
           <p

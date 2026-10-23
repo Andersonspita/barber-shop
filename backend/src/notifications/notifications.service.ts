@@ -16,9 +16,12 @@ export interface WhatsappJob {
     | 'waitlist'
     | 'birthday'
     | 'trial'
-    | 'billing';
-  /** Define por qual número de WhatsApp a mensagem sai. */
-  shopId: string;
+    | 'platform';
+  /**
+   * Define por qual número de WhatsApp a mensagem sai. Vazio nas mensagens da
+   * própria plataforma (mensalidade), que saem pelo número padrão.
+   */
+  shopId?: string;
   to: string;
   message: string;
   appointmentId?: string;
@@ -150,14 +153,17 @@ export class NotificationsService {
     });
   }
 
-  /** Avisos do teste grátis (vai vencer / venceu) para o dono da barbearia. */
+  /** Avisos do teste grátis (vai vencer) para o dono da barbearia. */
   async trialNotice(shopId: string, to: string, message: string) {
     await this.enqueue({ kind: 'trial', shopId, to, message });
   }
 
-  /** Avisos de cobrança (fatura, vencimento, suspensão) para o dono. */
-  async billingNotice(shopId: string, to: string, message: string) {
-    await this.enqueue({ kind: 'billing', shopId, to, message });
+  /**
+   * Mensagem da plataforma para o dono da barbearia (mensalidade). Sai pelo
+   * número padrão da plataforma, não pelo da barbearia.
+   */
+  async platformNotice(to: string, message: string) {
+    await this.enqueue({ kind: 'platform', to, message });
   }
 
   // ---------------------------------------------------------------- internos

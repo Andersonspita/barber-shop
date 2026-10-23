@@ -13,6 +13,7 @@ import { AppointmentsService, SessionUser } from './appointments.service';
 import { AvailabilityService } from '../availability/availability.service';
 import { AdminOnly, Auth, Roles } from '../common/roles.guard';
 import { ShopId } from '../common/shop-context';
+import { BillingService } from '../billing/billing.service';
 import {
   AgendaQueryDto,
   AvailabilityQueryDto,
@@ -30,6 +31,7 @@ export class AppointmentsController {
   constructor(
     private readonly appointments: AppointmentsService,
     private readonly availability: AvailabilityService,
+    private readonly billing: BillingService,
   ) {}
 
   /** Pública: a landing page mostra os horários antes de pedir login. */
@@ -49,6 +51,9 @@ export class AppointmentsController {
   @Auth()
   @Post()
   async book(@Body() body: BookAppointmentDto, @Request() req: AuthedRequest) {
+    // Mensalidade atrasada além da tolerância: pausa só o agendamento feito
+    // pelo cliente. Encaixe, remarcação pela equipe e painel continuam.
+    await this.billing.assertOnlineBookingOpen(req.user.shopId);
     const appointment = await this.appointments.book({
       shopId: req.user.shopId,
       clientId: req.user.id,
@@ -130,6 +135,9 @@ export class AppointmentsController {
     @Body() body: RescheduleAppointmentDto,
     @Request() req: AuthedRequest,
   ) {
+    if (req.user.role === 'CLIENT') {
+      await this.billing.assertOnlineBookingOpen(req.user.shopId);
+    }
     const appointment = await this.appointments.reschedule(
       id,
       new Date(body.startTime),

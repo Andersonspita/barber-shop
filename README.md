@@ -23,7 +23,7 @@ horário; relatório financeiro com comissão.
 
 **Administrador** — agenda da barbearia inteira, cadastro de clientes, equipe
 (com jornada semanal e comissão por profissional), serviços, feriados e as
-regras da agenda.
+regras da agenda, e a assinatura da barbearia (plano e faturas).
 
 ## Várias barbearias (multi-tenant)
 
@@ -44,7 +44,8 @@ em várias, como contas independentes (senha e histórico próprios). O navegado
 guarda uma sessão por barbearia, e o token de uma é recusado na página de outra.
 
 **Painel da plataforma** (`APP_URL/plataforma`). Onde você, que opera o sistema,
-cadastra barbearias, troca o endereço, suspende e liga o WhatsApp de cada uma. O acesso é a chave
+cadastra barbearias, troca o endereço, suspende, liga o WhatsApp e cuida da
+mensalidade de cada uma. O acesso é a chave
 `PLATFORM_ADMIN_KEY` do `.env` — sem ela o painel fica desligado. Ao criar uma
 barbearia, ela já nasce com o primeiro administrador; a senha temporária
 aparece uma única vez e a troca é obrigatória no primeiro acesso. Suspender
@@ -62,27 +63,95 @@ o endereço antigo deixa de funcionar na hora.
 
 O [SDR-AI](https://github.com/Andersonspita/SDR-AI-BARBER-SHOP) prospecta barbearias no WhatsApp e, quando o dono topa, cria a barbearia dele aqui já em **teste grátis**:
 
-- `POST /provisioning/trials` com o cabeçalho `X-Provisioning-Key` (`PROVISIONING_API_KEY`). É uma chave separada da `PLATFORM_ADMIN_KEY`: ela só cria testes. A barbearia nasce com o dono (que define a senha por um link de uso único válido por `TRIAL_SETUP_LINK_TTL_HOURS`), a jornada padrão e os serviços Corte, Barba e Combo. O pedido é idempotente pelo lead, e um endereço em uso ganha sufixo (`-2`, `-3`...).
-- Um job de hora em hora avisa o dono no WhatsApp 48h antes do fim e, no vencimento, tira a barbearia do ar (`EXPIRED`) sem apagar nada.
-- Em `/plataforma`, **Ativar plano** converte o teste (ou um teste vencido) e devolve a barbearia ao ar.
-- Cada etapa (`trial.activated`, `trial.expiring`, `trial.expired`, `subscription.activated`) é enviada ao SDR em `SDR_WEBHOOK_URL`, assinada com HMAC-SHA256 (`SDR_WEBHOOK_SECRET`) e com novas tentativas pela fila.
+- `POST /provisioning/trials` com o cabeçalho `X-Provisioning-Key` (`PROVISIONING_API_KEY`). É uma chave separada da `PLATFORM_ADMIN_KEY`: ela só cria testes. A barbearia nasce com o dono (que define a senha por um link de uso único válido por `TRIAL_SETUP_LINK_TTL_HOURS`), a jornada padrão, os serviços Corte, Barba e Combo e o plano pedido (os códigos antigos `SOLO`, `SQUAD`, `PRO` e `EMPIRE` viram Solo, Essencial, Profissional e Premium). O pedido é idempotente pelo lead, e um endereço em uso ganha sufixo (`-2`, `-3`...).
+- Um job de hora em hora avisa o dono 48h antes do fim do teste. Depois disso vale a mensalidade (abaixo): a 1ª fatura vence no fim do teste e, sem pagamento, o agendamento online pausa após a tolerância. Nada sai do ar.
+- Cada etapa é enviada ao SDR em `SDR_WEBHOOK_URL`, assinada com HMAC-SHA256 (`SDR_WEBHOOK_SECRET`) e com novas tentativas pela fila: `trial.activated` (primeiro acesso), `trial.expiring` (48h antes), `subscription.invoice_created` (fatura gerada), `trial.expired` (1ª fatura vencida), `subscription.past_due` (fatura seguinte vencida), `subscription.suspended` (agendamento online pausado), `subscription.activated` (primeiro pagamento) e `subscription.reactivated` (pagou o atraso). `subscriptionStatus` vai como `TRIAL`, `ACTIVE`, `PAST_DUE`, `BLOCKED` ou `EXEMPT`.
 
-**Avisos ao dono das barbearias vindas do SDR.** Com `SDR_WEBHOOK_URL` e `SDR_WEBHOOK_SECRET` configurados, os avisos de teste (acabando, vencido) e de cobrança (fatura gerada, pagamento confirmado, vencida, suspensa, reativada) **não saem pelo WhatsApp da plataforma**: o aviso vai ao SDR, que o manda na conversa que já tem com o dono e trata a resposta. Para isso o payload leva `name`, `url`, `subscribeUrl`, `invoiceUrl` e `suspendsAt`. Barbearias criadas direto na plataforma continuam recebendo os avisos daqui.
+**Avisos ao dono das barbearias vindas do SDR.** Com `SDR_WEBHOOK_URL` e `SDR_WEBHOOK_SECRET` configurados, os avisos de teste e de cobrança **não saem pelo WhatsApp da plataforma**: o aviso vai ao SDR, que o manda na conversa que já tem com o dono e trata a resposta. Para isso o payload leva `name`, `url`, `subscribeUrl`, `invoiceUrl` e `suspendsAt` (quando o agendamento pausa). Barbearias criadas direto na plataforma continuam recebendo os avisos daqui.
 
 Teste ponta a ponta: `npm run test:e2e -- trial-provisioning` (Postgres e Redis reais).
 
-## Cobrança (Asaas)
+## Mensalidade das barbearias
 
-A mensalidade de cada barbearia é uma assinatura no [Asaas](https://www.asaas.com), com Pix, boleto ou cartão.
+Cada barbearia paga uma mensalidade conforme o número de **profissionais
+ativos** (administradores que não atendem não contam):
 
-- **Assinar:** o dono escolhe plano e forma de pagamento em **Painel → Assinatura**, e o link da 1ª fatura abre na hora. Para quem não consegue entrar no painel (teste vencido, suspensa), quem opera a plataforma usa **Gerar cobrança** em `/plataforma`, e o link vai no WhatsApp do dono. O CPF/CNPJ vai direto para o Asaas e não fica guardado aqui.
-- **Pagou** (`PAYMENT_RECEIVED`/`PAYMENT_CONFIRMED`): o plano ativa sozinho, e a barbearia volta ao ar se estava com o teste vencido ou suspensa.
-- **Venceu** (`PAYMENT_OVERDUE`): a barbearia fica `PAST_DUE`, ainda no ar, e o dono recebe o link da fatura. Passados `BILLING_GRACE_DAYS` dias sem pagamento, um job de hora em hora a suspende (`SUSPENDED`, fora do ar, sem apagar dados). O pagamento atrasado a reativa na hora.
-- **Ativar sem cobrança** em `/plataforma` continua disponível para pagamentos combinados por fora.
+| Plano        | Profissionais | Mensalidade                                   |
+| ------------ | ------------- | --------------------------------------------- |
+| Solo         | 1             | R$ 35,00                                      |
+| Essencial    | até 3         | R$ 89,90                                      |
+| Profissional | até 6         | R$ 149,90                                     |
+| Premium      | até 10        | R$ 219,90                                     |
+| Rede         | sem limite    | R$ 219,90 com 10 inclusos + R$ 19,90 por extra |
 
-Configuração: crie a chave de API no Asaas (`ASAAS_API_KEY`, **entre aspas simples** no `.env`, porque ela começa com `$` e o Docker Compose a apagaria; use `ASAAS_ENV=production` com chave de produção) e cadastre um webhook para `APP_URL/billing/asaas/webhook` com os eventos de cobrança e um token de autenticação, que vai também em `ASAAS_WEBHOOK_TOKEN`. Eventos repetidos são descartados pelo id.
+Os preços ficam no banco e são editáveis em `/plataforma` → **Planos e
+preços**. Mudar um preço vale para as próximas faturas; as já geradas não
+mudam.
 
-Preços dos planos: `backend/src/billing/plans.ts`. Teste ponta a ponta: `npm run test:e2e -- billing`.
+**Ciclo.** A barbearia nova nasce no plano escolhido (padrão Solo) com
+`BILLING_TRIAL_DAYS` dias de teste grátis. A mensalidade é paga adiantada: a
+primeira fatura cobre o mês que começa no fim do teste e vence nesse dia; as
+seguintes emendam na anterior. Cada fatura é gerada
+`BILLING_INVOICE_DAYS_BEFORE` dias antes do vencimento, e o administrador da
+barbearia é avisado pelo WhatsApp (ou pela conversa do SDR).
+
+**Atraso.** Vencida, a fatura deixa a assinatura **em atraso**, e tudo segue
+funcionando por `BILLING_GRACE_DAYS` dias. Passada a tolerância, só o
+**agendamento online dos clientes** é pausado: a vitrine mostra o contato da
+barbearia no lugar do botão de agendar. Agenda, encaixes, painel e horários já
+marcados continuam normais. O administrador recebe um aviso no atraso e outro
+na pausa.
+
+**Pagamento por fora.** Sem pagamento online, o pagamento é
+combinado por fora (o texto de `BILLING_PAYMENT_INSTRUCTIONS` aparece para o
+administrador e nas mensagens) e você dá a **baixa manual** em `/plataforma` →
+**Assinatura** → **Marcar como paga**. A baixa libera o agendamento na hora.
+
+**Limite do plano.** Cadastrar ou reativar um profissional além do limite é
+recusado com a indicação do plano que comporta a equipe. O administrador troca
+de plano sozinho em **Painel → Assinatura**; não é possível ir para um plano
+menor que a equipe atual.
+
+**Cortesia.** Barbearias marcadas como cortesia não geram fatura nem têm limite
+de profissionais. Na atualização, todas as barbearias que já existiam viram
+cortesia, no plano que comporta a equipe delas; tire a marcação em
+`/plataforma` → **Assinatura** quando for começar a cobrar.
+
+No painel da plataforma, cada barbearia mostra a situação (cortesia, teste
+grátis, em dia, em atraso, agendamento pausado). Em **Assinatura** dá para
+trocar o plano, mudar o fim do teste, marcar cortesia, gerar a próxima fatura
+na hora e cancelar ou reabrir faturas. Uma rotina de hora em hora gera as
+faturas e envia os avisos, sem duplicar.
+
+
+**Pagamento online (Asaas, opcional).** Com `ASAAS_API_KEY` configurada, a
+fatura também pode ser paga por Pix, boleto ou cartão no
+[Asaas](https://www.asaas.com). O dono liga em **Painel → Assinatura**
+informando o CPF/CNPJ de quem paga (ou quem opera a plataforma liga em
+`/plataforma` → **Assinatura**, e o dono recebe o link da fatura em aberto). O
+CPF/CNPJ vai só para o Asaas; aqui fica apenas o id do cliente. A partir daí
+cada fatura gerada ganha uma cobrança no Asaas com o link de pagamento, que vai
+nas mensagens. Quando o Asaas confirma o pagamento (`PAYMENT_RECEIVED` ou
+`PAYMENT_CONFIRMED`), a fatura recebe baixa sozinha — o mesmo efeito da baixa
+manual, que continua valendo para pagamentos por fora (e cancela a cobrança no
+Asaas, para ninguém pagar duas vezes).
+
+Configuração: crie a chave de API no Asaas (`ASAAS_API_KEY`, **entre aspas
+simples** no `.env`, porque ela começa com `$` e o Docker Compose a apagaria;
+use `ASAAS_ENV=production` com chave de produção) e cadastre um webhook para
+`APP_URL/billing/asaas/webhook` com os eventos de cobrança e um token de
+autenticação, que vai também em `ASAAS_WEBHOOK_TOKEN`. Eventos repetidos são
+descartados pelo id.
+
+No Asaas (**Menu do usuário → Integrações → Webhooks → Criar Webhook**), marque
+os eventos de cobrança `PAYMENT_CONFIRMED`, `PAYMENT_RECEIVED`,
+`PAYMENT_RECEIVED_IN_CASH`, `PAYMENT_REFUNDED`, `PAYMENT_CHARGEBACK_REQUESTED`,
+`PAYMENT_RECEIVED_IN_CASH_UNDONE` e `PAYMENT_DELETED`. Pagamento (confirmado ou
+recebido) dá baixa; estorno, chargeback e recebimento desfeito reabrem a
+fatura; cobrança apagada no painel do Asaas some do link da fatura, que segue
+aberta. Vencimento e pausa não dependem do Asaas: saem da rotina de cobrança.
+O Asaas interrompe a fila depois de 15 falhas seguidas; nesse caso, reative-a
+na mesma tela.
 
 ## Configuração da agenda
 
@@ -148,7 +217,7 @@ Pré-requisito: Docker e Docker Compose instalados no VPS ([guia oficial](https:
 ### Primeiro acesso
 
 Abra `APP_URL/plataforma`, entre com a `PLATFORM_ADMIN_KEY` e cadastre a
-primeira barbearia com o administrador dela. Ele entra em
+primeira barbearia com o administrador dela, o plano e os dias de teste. Ele entra em
 `APP_URL/<slug>/login?area=profissional` e monta equipe, serviços e horários.
 Contas criadas pelo administrador também recebem uma **senha temporária
 sorteada**, mostrada uma única vez na tela, e a troca é obrigatória no primeiro
@@ -208,7 +277,8 @@ docker compose exec backend npx prisma db seed
 
 Cria duas barbearias — `principal` (São Paulo) e `navalha-de-ouro` (Recife) —
 com equipe, serviços, jornada da semana e o mesmo cliente cadastrado nas duas,
-para ver o isolamento na prática. As credenciais aparecem no final da saída do
+para ver o isolamento na prática. A `principal` fica no plano Essencial e a
+`navalha-de-ouro` no Solo, ambas em teste grátis de 14 dias. As credenciais aparecem no final da saída do
 comando. **O seed apaga os dados existentes: não rode em produção.**
 
 ## Desenvolvimento
@@ -234,4 +304,7 @@ cd backend && npm test
 # isolamento entre barbearias, contra Postgres e Redis reais (use um banco
 # de teste; o teste cria e apaga as próprias barbearias)
 cd backend && npm run test:e2e -- tenant-isolation
+
+# mensalidade: teste grátis, limite do plano, atraso, pausa e baixa manual
+cd backend && npm run test:e2e -- billing
 ```

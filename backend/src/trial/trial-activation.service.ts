@@ -24,14 +24,15 @@ export class TrialActivationService {
           isAdmin: true,
           shopId: true,
           shop: {
-            select: { subscriptionStatus: true, trialActivatedAt: true },
+            select: { externalLeadId: true, trialActivatedAt: true },
           },
         },
       });
-      // Caminho comum (cliente, barbeiro, barbearia fora de teste): só esta leitura.
+      // Caminho comum (cliente, barbeiro, barbearia que não veio do SDR ou já
+      // ativada): só esta leitura.
       if (
         !user?.isAdmin ||
-        user.shop.subscriptionStatus !== 'TRIAL' ||
+        !user.shop.externalLeadId ||
         user.shop.trialActivatedAt
       ) {
         return;
@@ -41,7 +42,6 @@ export class TrialActivationService {
       const { count } = await this.prisma.shop.updateMany({
         where: {
           id: user.shopId,
-          subscriptionStatus: 'TRIAL',
           trialActivatedAt: null,
         },
         data: { trialActivatedAt: new Date() },
@@ -51,7 +51,8 @@ export class TrialActivationService {
       const shop = await this.prisma.shop.findUniqueOrThrow({
         where: { id: user.shopId },
       });
-      await this.webhooks.emit('trial.activated', shop);
+      // Primeiro acesso acontece no teste: a situação é TRIAL.
+      await this.webhooks.emit('trial.activated', { ...shop, status: 'TRIAL' });
     } catch (error) {
       this.logger.error(
         `Falha ao registrar o primeiro acesso do usuário ${userId}: ${String(error)}`,

@@ -2,11 +2,10 @@ import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
 import { addHours } from 'date-fns';
-import { formatInTimeZone } from 'date-fns-tz';
 import { PrismaService } from '../prisma/prisma.service';
-import { ShopSettingsService } from '../shop/shop-settings.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { SdrWebhookService, notifiesThroughSdr } from './sdr-webhook.service';
+import { BillingService } from '../billing/billing.service';
+import { notifiesThroughSdr } from './sdr-webhook.service';
 
 export const TRIAL_LIFECYCLE_QUEUE = 'trial-lifecycle-queue';
 const LIFECYCLE_JOB = 'trial-lifecycle';
@@ -43,9 +42,9 @@ export class TrialLifecycleScheduler implements OnModuleInit {
 }
 
 /**
- * Teste grátis vencendo: avisa o dono 48h antes e, no vencimento, tira a
- * barbearia do ar (EXPIRED + suspensa). Os dados ficam: ativar o plano na
- * plataforma devolve tudo como estava.
+ * Teste grátis acabando: avisa o dono 48h antes. O vencimento em si é da
+ * cobrança — a 1ª fatura vence no fim do teste e, sem pagamento, o
+ * agendamento online pausa depois da tolerância. Nada sai do ar aqui.
  */
 @Processor(TRIAL_LIFECYCLE_QUEUE)
 export class TrialLifecycleProcessor extends WorkerHost {
@@ -53,9 +52,8 @@ export class TrialLifecycleProcessor extends WorkerHost {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly shops: ShopSettingsService,
     private readonly notifications: NotificationsService,
-    private readonly webhooks: SdrWebhookService,
+    private readonly billing: BillingService,
   ) {
     super();
   }
@@ -66,18 +64,19 @@ export class TrialLifecycleProcessor extends WorkerHost {
   }
 
   /** Público para os testes rodarem o ciclo num instante escolhido. */
-  async run(now: Date): Promise<{ reminded: number; expired: number }> {
-    const reminded = await this.sendReminders(now);
-    const expired = await this.expire(now);
-    return { reminded, expired };
+  async run(now: Date): Promise<{ reminded: number }> {
+    return { reminded: await this.sendReminders(now) };
   }
 
   private async sendReminders(now: Date): Promise<number> {
     const shops = await this.prisma.shop.findMany({
       where: {
-        subscriptionStatus: 'TRIAL',
+        isActive: true,
+        billingExempt: false,
         trialReminderSentAt: null,
         trialEndsAt: { gt: now, lte: addHours(now, REMINDER_HOURS_BEFORE) },
+        // Quem já pagou não está mais "em teste".
+        invoices: { none: { status: 'PAID' } },
       },
     });
 
@@ -90,17 +89,17 @@ export class TrialLifecycleProcessor extends WorkerHost {
         });
         if (count === 0) continue;
 
-        const when = formatInTimeZone(
-          shop.trialEndsAt!,
-          shop.timezone,
-          "dd/MM 'às' HH:mm",
-        );
-        await this.notifyOwner(
-          shop,
-          `Seu teste grátis da ${shop.name} no Gerente Barber termina em ${when}.\n\n` +
-            `Para continuar com a agenda online e os lembretes no WhatsApp, é só responder esta mensagem que a gente ativa o seu plano.`,
-        );
-        await this.webhooks.emit('trial.expiring', shop);
+        if (notifiesThroughSdr(shop)) {
+          await this.billing.emitToSdr('trial.expiring', shop.id, now);
+        } else {
+          await this.notifyOwner(
+            shop.id,
+            `Seu teste grátis da ${shop.name} no Gerente Barber termina em ${formatDay(shop.trialEndsAt!)}.
+
+` +
+              `Para continuar com a agenda online e os lembretes no WhatsApp, é só pagar a primeira mensalidade — ela está em Assinatura, no painel.`,
+          );
+        }
         reminded++;
       } catch (error) {
         this.logger.error(
@@ -111,52 +110,11 @@ export class TrialLifecycleProcessor extends WorkerHost {
     return reminded;
   }
 
-  private async expire(now: Date): Promise<number> {
-    const shops = await this.prisma.shop.findMany({
-      where: { subscriptionStatus: 'TRIAL', trialEndsAt: { lte: now } },
-      select: { id: true, slug: true },
-    });
-
-    let expired = 0;
-    for (const { id, slug } of shops) {
-      try {
-        const { count } = await this.prisma.shop.updateMany({
-          where: { id, subscriptionStatus: 'TRIAL' },
-          data: { subscriptionStatus: 'EXPIRED', isActive: false },
-        });
-        if (count === 0) continue;
-
-        // Vitrine e sessões caem já, não quando o cache de 30 s vencer.
-        this.shops.forget(id);
-        const shop = await this.prisma.shop.findUniqueOrThrow({
-          where: { id },
-        });
-        await this.notifyOwner(
-          shop,
-          `O teste grátis da ${shop.name} terminou e a página saiu do ar.\n\n` +
-            `Seus clientes, serviços e horários continuam guardados. Responda esta mensagem para ativar o plano e voltar ao ar na hora.`,
-        );
-        await this.webhooks.emit('trial.expired', shop);
-        expired++;
-        this.logger.log(`Teste grátis vencido: ${slug}`);
-      } catch (error) {
-        this.logger.error(
-          `Expiração do teste da ${slug} falhou: ${String(error)}`,
-        );
-      }
-    }
-    return expired;
-  }
-
   /** Aviso pelo WhatsApp da plataforma — só para barbearias que não vieram do SDR. */
-  private async notifyOwner(
-    shop: { id: string; externalLeadId: string | null },
-    message: string,
-  ) {
-    if (notifiesThroughSdr(shop)) return;
+  private async notifyOwner(shopId: string, message: string) {
     const owner = await this.prisma.user.findFirst({
       where: {
-        shopId: shop.id,
+        shopId,
         isAdmin: true,
         isActive: true,
         phoneNumber: { not: null },
@@ -164,10 +122,13 @@ export class TrialLifecycleProcessor extends WorkerHost {
       orderBy: { createdAt: 'asc' },
       select: { phoneNumber: true },
     });
-    await this.notifications.trialNotice(
-      shop.id,
-      owner?.phoneNumber ?? '',
-      message,
-    );
+    if (!owner?.phoneNumber) return;
+    await this.notifications.trialNotice(shopId, owner.phoneNumber, message);
   }
+}
+
+/** O fim do teste é um dia (gravado à meia-noite UTC), sem horário. */
+function formatDay(date: Date): string {
+  const [, m, d] = date.toISOString().slice(0, 10).split('-');
+  return `${d}/${m}`;
 }

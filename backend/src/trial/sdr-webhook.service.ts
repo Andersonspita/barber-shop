@@ -2,7 +2,6 @@ import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
 import { createHmac, randomUUID } from 'node:crypto';
-import { billingGraceDays } from '../billing/plans';
 
 export const SDR_WEBHOOK_QUEUE = 'sdr-webhook-queue';
 
@@ -16,17 +15,23 @@ export type TrialEvent =
   | 'subscription.suspended'
   | 'subscription.invoice_created';
 
-/** Campos da barbearia lidos para montar o aviso ao SDR-AI. */
+/**
+ * Barbearia + situação da assinatura no momento do aviso. A situação é
+ * calculada pela cobrança (faturas), então quem emite informa:
+ * `status` (EXEMPT, TRIAL, ACTIVE, PAST_DUE, BLOCKED), a fatura em aberto e
+ * quando o agendamento online pausa, se não for paga.
+ */
 export interface TrialShopSnapshot {
   id: string;
   slug: string;
   name: string;
   externalLeadId: string | null;
-  subscriptionStatus: string;
-  plan: string | null;
+  planCode: string | null;
   trialEndsAt: Date | null;
-  billingInvoiceUrl?: string | null;
-  pastDueSince?: Date | null;
+  status: string;
+  invoiceUrl?: string | null;
+  /** Quando o agendamento online pausa se a fatura em aberto não for paga. */
+  pausesAt?: Date | null;
 }
 
 /**
@@ -45,9 +50,9 @@ export interface SdrShopPayload {
   url: string;
   /** Tela de assinatura do painel (o dono precisa estar logado). */
   subscribeUrl: string;
-  /** Fatura em aberto no Asaas, quando houver. */
+  /** Link de pagamento (Asaas) da fatura em aberto, quando houver. */
   invoiceUrl: string | null;
-  /** Quando a barbearia inadimplente sai do ar, se não pagar. */
+  /** Quando o agendamento online pausa, se a fatura em aberto não for paga. */
   suspendsAt: string | null;
 }
 
@@ -114,17 +119,13 @@ export class SdrWebhookService {
         slug: shop.slug,
         name: shop.name,
         externalLeadId: shop.externalLeadId,
-        subscriptionStatus: shop.subscriptionStatus,
-        plan: shop.plan,
+        subscriptionStatus: shop.status,
+        plan: shop.planCode,
         trialEndsAt: shop.trialEndsAt ? shop.trialEndsAt.toISOString() : null,
         url: `${appUrl()}/${shop.slug}`,
         subscribeUrl: `${appUrl()}/${shop.slug}/dashboard/assinatura`,
-        invoiceUrl: shop.billingInvoiceUrl ?? null,
-        suspendsAt: shop.pastDueSince
-          ? new Date(
-              shop.pastDueSince.getTime() + billingGraceDays() * 86_400_000,
-            ).toISOString()
-          : null,
+        invoiceUrl: shop.invoiceUrl ?? null,
+        suspendsAt: shop.pausesAt ? shop.pausesAt.toISOString() : null,
       },
     };
 
