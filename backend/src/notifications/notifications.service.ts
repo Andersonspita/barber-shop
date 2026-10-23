@@ -56,7 +56,7 @@ export class NotificationsService {
   ) {}
 
   async appointmentConfirmed(appointment: AppointmentLike) {
-    const { when, shopName } = await this.context(appointment);
+    const { when, shopName, links } = await this.context(appointment);
     const phone = appointment.client?.phoneNumber;
 
     await this.enqueue({
@@ -69,7 +69,11 @@ export class NotificationsService {
         `✂️ ${appointment.service?.name ?? 'Serviço'}\n` +
         `👤 ${appointment.barber?.name ?? 'Equipe'}\n` +
         `🗓️ ${when}\n\n` +
-        `Se precisar remarcar, é só responder esta mensagem.`,
+        (links.ownNumber
+          ? `Se precisar remarcar, é só responder esta mensagem.`
+          : `Para remarcar ou cancelar: ${links.reservations}` +
+            links.shopContact +
+            PLATFORM_NUMBER_FOOTER),
     });
 
     await this.scheduleReminder(appointment);
@@ -98,7 +102,7 @@ export class NotificationsService {
   }
 
   async appointmentCancelled(appointment: AppointmentLike) {
-    const { when, shopName } = await this.context(appointment);
+    const { when, shopName, links } = await this.context(appointment);
 
     await this.cancelReminder(appointment.id);
     await this.enqueue({
@@ -108,7 +112,7 @@ export class NotificationsService {
       appointmentId: appointment.id,
       message:
         `Olá, ${firstName(appointment.client?.name)}. Seu horário de ${when} na ${shopName} foi cancelado.\n\n` +
-        `Quando quiser, é só agendar de novo.`,
+        `Quando quiser, é só agendar de novo: ${links.book}`,
     });
   }
 
@@ -122,6 +126,7 @@ export class NotificationsService {
   ) {
     const settings = await this.shop.get(shopId);
     const when = formatWhen(startTime, settings.timezone);
+    const links = shopLinks(settings);
 
     for (const entry of entries) {
       await this.enqueue({
@@ -132,7 +137,7 @@ export class NotificationsService {
           `Oi, ${firstName(entry.client.name)}! Vagou um horário na ${settings.name}.\n\n` +
           `✂️ ${entry.service.name}\n` +
           `🗓️ ${when}\n\n` +
-          `Corre que é por ordem de chegada.`,
+          `Corre que é por ordem de chegada: ${links.book}`,
       });
     }
   }
@@ -174,7 +179,7 @@ export class NotificationsService {
    * um lembrete de um horário que não existe mais.
    */
   private async scheduleReminder(appointment: AppointmentLike) {
-    const { when, shopName } = await this.context(appointment);
+    const { when, shopName, links } = await this.context(appointment);
     const remindAt = subHours(appointment.startTime, this.reminderHoursBefore);
     const delay = differenceInMilliseconds(remindAt, new Date());
 
@@ -190,7 +195,11 @@ export class NotificationsService {
           `Lembrete: seu horário na ${shopName} é ${when}.\n\n` +
           `✂️ ${appointment.service?.name ?? 'Serviço'}\n` +
           `👤 ${appointment.barber?.name ?? 'Equipe'}\n\n` +
-          `Se não puder vir, avise a gente para liberar o horário.`,
+          (links.ownNumber
+            ? `Se não puder vir, avise a gente para liberar o horário.`
+            : `Se não puder vir, cancele por aqui para liberar o horário: ${links.reservations}` +
+              links.shopContact +
+              PLATFORM_NUMBER_FOOTER),
       },
       { delay, jobId: reminderJobId(appointment.id) },
     );
@@ -235,8 +244,41 @@ export class NotificationsService {
       timezone: settings.timezone,
       shopName: settings.name,
       when: formatWhen(appointment.startTime, settings.timezone),
+      links: shopLinks(settings),
     };
   }
+}
+
+/**
+ * Sem instância própria, as mensagens saem pelo número da plataforma, que
+ * ninguém da barbearia lê: em vez de "responda esta mensagem", vão o link das
+ * reservas e o contato da própria barbearia.
+ */
+const PLATFORM_NUMBER_FOOTER =
+  '\n\n_Mensagem automática: este número não recebe respostas._';
+
+export function shopLinks(settings: {
+  slug: string;
+  whatsapp?: string | null;
+  phone?: string | null;
+  whatsappInstance?: string | null;
+}) {
+  const base = `${(process.env.APP_URL ?? '').replace(/\/+$/, '')}/${settings.slug}`;
+  const contact = whatsappLink(settings.whatsapp) ?? settings.phone ?? null;
+  return {
+    /** A barbearia tem o próprio WhatsApp conectado: o cliente pode responder. */
+    ownNumber: Boolean(settings.whatsappInstance?.trim()),
+    book: `${base}/reservas/nova`,
+    reservations: `${base}/reservas`,
+    shopContact: contact ? `\nFalar com a barbearia: ${contact}` : '',
+  };
+}
+
+function whatsappLink(raw?: string | null): string | null {
+  const digits = (raw ?? '').replace(/\D/g, '');
+  if (digits.length < 10) return null;
+  const country = process.env.WHATSAPP_COUNTRY_CODE ?? '55';
+  return `https://wa.me/${digits.startsWith(country) && digits.length > 11 ? digits : country + digits}`;
 }
 
 function reminderJobId(appointmentId: string): string {
