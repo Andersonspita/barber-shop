@@ -2,6 +2,7 @@ import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
 import { createHmac, randomUUID } from 'node:crypto';
+import { billingGraceDays } from '../billing/plans';
 
 export const SDR_WEBHOOK_QUEUE = 'sdr-webhook-queue';
 
@@ -12,23 +13,68 @@ export type TrialEvent =
   | 'subscription.activated'
   | 'subscription.reactivated'
   | 'subscription.past_due'
-  | 'subscription.suspended';
+  | 'subscription.suspended'
+  | 'subscription.invoice_created';
 
-/** Recorte da barbearia que o SDR-AI precisa para atualizar o lead. */
+/** Campos da barbearia lidos para montar o aviso ao SDR-AI. */
 export interface TrialShopSnapshot {
   id: string;
   slug: string;
+  name: string;
   externalLeadId: string | null;
   subscriptionStatus: string;
   plan: string | null;
   trialEndsAt: Date | null;
+  billingInvoiceUrl?: string | null;
+  pastDueSince?: Date | null;
+}
+
+/**
+ * O que o SDR recebe: o suficiente para atualizar o lead e escrever, na
+ * própria conversa, os avisos de teste e de cobrança ao dono.
+ */
+export interface SdrShopPayload {
+  id: string;
+  slug: string;
+  name: string;
+  externalLeadId: string | null;
+  subscriptionStatus: string;
+  plan: string | null;
+  trialEndsAt: string | null;
+  /** Vitrine pública. */
+  url: string;
+  /** Tela de assinatura do painel (o dono precisa estar logado). */
+  subscribeUrl: string;
+  /** Fatura em aberto no Asaas, quando houver. */
+  invoiceUrl: string | null;
+  /** Quando a barbearia inadimplente sai do ar, se não pagar. */
+  suspendsAt: string | null;
 }
 
 export interface SdrWebhookPayload {
   id: string;
   event: TrialEvent;
   occurredAt: string;
-  shop: Omit<TrialShopSnapshot, 'trialEndsAt'> & { trialEndsAt: string | null };
+  shop: SdrShopPayload;
+}
+
+function appUrl(): string {
+  return (process.env.APP_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
+}
+
+/**
+ * Barbearia vinda do SDR com a integração ligada: os avisos ao dono saem pela
+ * conversa do SDR (que trata a resposta), e não pelo WhatsApp da plataforma —
+ * senão a resposta do dono cairia num número que ninguém lê.
+ */
+export function notifiesThroughSdr(shop: {
+  externalLeadId: string | null;
+}): boolean {
+  return Boolean(
+    shop.externalLeadId &&
+    process.env.SDR_WEBHOOK_URL?.trim() &&
+    process.env.SDR_WEBHOOK_SECRET?.trim(),
+  );
 }
 
 const JOB_OPTIONS = {
@@ -66,10 +112,19 @@ export class SdrWebhookService {
       shop: {
         id: shop.id,
         slug: shop.slug,
+        name: shop.name,
         externalLeadId: shop.externalLeadId,
         subscriptionStatus: shop.subscriptionStatus,
         plan: shop.plan,
         trialEndsAt: shop.trialEndsAt ? shop.trialEndsAt.toISOString() : null,
+        url: `${appUrl()}/${shop.slug}`,
+        subscribeUrl: `${appUrl()}/${shop.slug}/dashboard/assinatura`,
+        invoiceUrl: shop.billingInvoiceUrl ?? null,
+        suspendsAt: shop.pastDueSince
+          ? new Date(
+              shop.pastDueSince.getTime() + billingGraceDays() * 86_400_000,
+            ).toISOString()
+          : null,
       },
     };
 

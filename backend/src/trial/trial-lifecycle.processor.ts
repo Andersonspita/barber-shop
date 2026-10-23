@@ -6,7 +6,7 @@ import { formatInTimeZone } from 'date-fns-tz';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShopSettingsService } from '../shop/shop-settings.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { SdrWebhookService } from './sdr-webhook.service';
+import { SdrWebhookService, notifiesThroughSdr } from './sdr-webhook.service';
 
 export const TRIAL_LIFECYCLE_QUEUE = 'trial-lifecycle-queue';
 const LIFECYCLE_JOB = 'trial-lifecycle';
@@ -96,7 +96,7 @@ export class TrialLifecycleProcessor extends WorkerHost {
           "dd/MM 'às' HH:mm",
         );
         await this.notifyOwner(
-          shop.id,
+          shop,
           `Seu teste grátis da ${shop.name} no Gerente Barber termina em ${when}.\n\n` +
             `Para continuar com a agenda online e os lembretes no WhatsApp, é só responder esta mensagem que a gente ativa o seu plano.`,
         );
@@ -132,7 +132,7 @@ export class TrialLifecycleProcessor extends WorkerHost {
           where: { id },
         });
         await this.notifyOwner(
-          id,
+          shop,
           `O teste grátis da ${shop.name} terminou e a página saiu do ar.\n\n` +
             `Seus clientes, serviços e horários continuam guardados. Responda esta mensagem para ativar o plano e voltar ao ar na hora.`,
         );
@@ -148,10 +148,15 @@ export class TrialLifecycleProcessor extends WorkerHost {
     return expired;
   }
 
-  private async notifyOwner(shopId: string, message: string) {
+  /** Aviso pelo WhatsApp da plataforma — só para barbearias que não vieram do SDR. */
+  private async notifyOwner(
+    shop: { id: string; externalLeadId: string | null },
+    message: string,
+  ) {
+    if (notifiesThroughSdr(shop)) return;
     const owner = await this.prisma.user.findFirst({
       where: {
-        shopId,
+        shopId: shop.id,
         isAdmin: true,
         isActive: true,
         phoneNumber: { not: null },
@@ -160,7 +165,7 @@ export class TrialLifecycleProcessor extends WorkerHost {
       select: { phoneNumber: true },
     });
     await this.notifications.trialNotice(
-      shopId,
+      shop.id,
       owner?.phoneNumber ?? '',
       message,
     );

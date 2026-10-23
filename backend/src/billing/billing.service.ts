@@ -10,7 +10,10 @@ import { subDays } from 'date-fns';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShopSettingsService } from '../shop/shop-settings.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { SdrWebhookService } from '../trial/sdr-webhook.service';
+import {
+  SdrWebhookService,
+  notifiesThroughSdr,
+} from '../trial/sdr-webhook.service';
 import { shopDateOnly } from '../common/time.util';
 import { AsaasClient, AsaasError, AsaasPayment } from './asaas.client';
 import { isValidCpfCnpj, onlyDigits } from './cpf-cnpj.util';
@@ -150,7 +153,7 @@ export class BillingService {
       });
       const payment = await this.asaas.pendingPayment(subscription.id);
 
-      await this.prisma.shop.update({
+      const updated = await this.prisma.shop.update({
         where: { id: shopId },
         data: {
           asaasSubscriptionId: subscription.id,
@@ -161,8 +164,9 @@ export class BillingService {
       });
 
       if (options.notifyOwner && payment?.invoiceUrl) {
+        await this.webhooks.emit('subscription.invoice_created', updated);
         await this.notifyOwner(
-          shopId,
+          updated,
           `Sua assinatura do Gerente Barber (Plano ${PLAN_NAMES[input.plan]}, ${formatPrice(PLAN_PRICES[input.plan])}/mês) está pronta.\n\n` +
             `Pague a primeira mensalidade por este link e o plano é ativado na hora:\n${payment.invoiceUrl}`,
         );
@@ -264,13 +268,13 @@ export class BillingService {
     if (previous === 'TRIAL' || previous === 'EXPIRED') {
       await this.webhooks.emit('subscription.activated', updated);
       await this.notifyOwner(
-        shop.id,
+        shop,
         `Pagamento confirmado! O Plano ${PLAN_NAMES[plan]} da ${shop.name} está ativo. Bom trabalho por aí! ✂️`,
       );
     } else if (previous === 'PAST_DUE' || previous === 'SUSPENDED') {
       await this.webhooks.emit('subscription.reactivated', updated);
       await this.notifyOwner(
-        shop.id,
+        shop,
         `Pagamento recebido, obrigado! A ${shop.name} está em dia${previous === 'SUSPENDED' ? ' e de volta ao ar' : ''}.`,
       );
     }
@@ -297,7 +301,7 @@ export class BillingService {
       },
     });
     await this.notifyOwner(
-      shop.id,
+      shop,
       `A mensalidade do Gerente Barber da ${shop.name} venceu.\n\n` +
         (invoiceUrl ? `Pague por aqui: ${invoiceUrl}\n\n` : '') +
         `Sem o pagamento em ${billingGraceDays()} dias, a página sai do ar (nenhum dado é apagado).`,
@@ -328,7 +332,7 @@ export class BillingService {
           where: { id },
         });
         await this.notifyOwner(
-          id,
+          shop,
           `A página da ${shop.name} saiu do ar por falta de pagamento.\n\n` +
             (shop.billingInvoiceUrl
               ? `Assim que a fatura for paga ela volta sozinha: ${shop.billingInvoiceUrl}`
@@ -354,10 +358,15 @@ export class BillingService {
     });
   }
 
-  private async notifyOwner(shopId: string, message: string) {
-    const owner = await this.owner(shopId);
+  /** Aviso pelo WhatsApp da plataforma — só para barbearias que não vieram do SDR. */
+  private async notifyOwner(
+    shop: { id: string; externalLeadId: string | null },
+    message: string,
+  ) {
+    if (notifiesThroughSdr(shop)) return;
+    const owner = await this.owner(shop.id);
     await this.notifications.billingNotice(
-      shopId,
+      shop.id,
       owner?.phoneNumber ?? '',
       message,
     );

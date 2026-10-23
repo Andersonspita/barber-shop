@@ -8,6 +8,7 @@ import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { BillingService } from '../src/billing/billing.service';
 import { TrialLifecycleProcessor } from '../src/trial/trial-lifecycle.processor';
+import { NotificationsService } from '../src/notifications/notifications.service';
 
 /**
  * Cobrança pelo Asaas, de ponta a ponta, contra Postgres e Redis reais. Um
@@ -44,8 +45,15 @@ describe('Cobrança pelo Asaas (e2e)', () => {
   let prisma: PrismaService;
   let fake: Server;
   const calls: FakeCall[] = [];
-  const sdrEvents: Array<{ event: string; shop: { externalLeadId: string } }> =
-    [];
+  const sdrEvents: Array<{
+    event: string;
+    shop: {
+      externalLeadId: string;
+      invoiceUrl: string | null;
+      suspendsAt: string | null;
+    };
+  }> = [];
+  let billingNotice: jest.SpyInstance;
   const createdShopIds: string[] = [];
   let subscriptionSeq = 0;
   let customerSeq = 0;
@@ -128,6 +136,7 @@ describe('Cobrança pelo Asaas (e2e)', () => {
     );
     await app.init();
     prisma = app.get(PrismaService);
+    billingNotice = jest.spyOn(app.get(NotificationsService), 'billingNotice');
 
     // Barbearia em teste vinda do SDR, com o dono já logado.
     const trial = await provision(shop.leadId, `e2e-bill-${RUN}`);
@@ -207,13 +216,10 @@ describe('Cobrança pelo Asaas (e2e)', () => {
   async function waitForSdr(event: string, leadId = shop.leadId) {
     const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
-      if (
-        sdrEvents.some(
-          (e) => e.event === event && e.shop.externalLeadId === leadId,
-        )
-      ) {
-        return;
-      }
+      const hit = sdrEvents.find(
+        (e) => e.event === event && e.shop.externalLeadId === leadId,
+      );
+      if (hit) return hit;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     throw new Error(`Aviso "${event}" não chegou ao SDR`);
@@ -347,6 +353,13 @@ describe('Cobrança pelo Asaas (e2e)', () => {
     });
     expect(state.pastDueSince).not.toBeNull();
     await http().get('/shop').set('x-shop', shop.slug).expect(200);
+    const pastDue = await waitForSdr('subscription.past_due');
+    expect(pastDue.shop.invoiceUrl).toBe(
+      `https://asaas.test/i/evt-overdue-${RUN}`,
+    );
+    expect(pastDue.shop.suspendsAt).toBe(
+      new Date(state.pastDueSince!.getTime() + 5 * 86_400_000).toISOString(),
+    );
 
     const billing = app.get(BillingService);
     const fourDays = new Date(state.pastDueSince!.getTime() + 4 * 86_400_000);
@@ -372,6 +385,11 @@ describe('Cobrança pelo Asaas (e2e)', () => {
     });
     await http().get('/shop').set('x-shop', shop.slug).expect(200);
     await waitForSdr('subscription.reactivated');
+
+    // Barbearia do SDR: nenhum aviso de cobrança saiu pelo WhatsApp da plataforma.
+    expect(
+      billingNotice.mock.calls.filter(([shopId]) => shopId === shop.id),
+    ).toHaveLength(0);
   });
 
   it('plataforma gera a cobrança para um teste vencido e o pagamento devolve ao ar', async () => {
@@ -390,6 +408,9 @@ describe('Cobrança pelo Asaas (e2e)', () => {
       .expect(201);
     const { invoiceUrl } = res.body as SubscribeBody;
     expect(invoiceUrl).toContain('asaas.test/i/');
+    // O link da fatura vai ao SDR, que o manda na conversa com o dono.
+    const created = await waitForSdr('subscription.invoice_created', leadId);
+    expect(created.shop.invoiceUrl).toBe(invoiceUrl);
 
     const sub = (
       await prisma.shop.findUniqueOrThrow({ where: { id: expired.shop.id } })
@@ -403,6 +424,33 @@ describe('Cobrança pelo Asaas (e2e)', () => {
       isActive: true,
     });
     await waitForSdr('subscription.activated', leadId);
+  });
+
+  it('barbearia que não veio do SDR continua recebendo os avisos da plataforma', async () => {
+    const created = await http()
+      .post('/platform/shops')
+      .set('x-platform-key', PLATFORM_KEY)
+      .send({
+        name: 'Barbearia Direta',
+        slug: `e2e-direta-${RUN}`,
+        adminName: 'Dono',
+        adminEmail: 'direta@e2e.com',
+        adminPhone: '5577999111222',
+      })
+      .expect(201);
+    const directId = (created.body as { shop: { id: string } }).shop.id;
+    createdShopIds.push(directId);
+
+    await http()
+      .post(`/platform/shops/${directId}/billing`)
+      .set('x-platform-key', PLATFORM_KEY)
+      .send({ plan: 'SOLO', method: 'PIX', cpfCnpj: CPF })
+      .expect(201);
+    expect(billingNotice).toHaveBeenCalledWith(
+      directId,
+      '5577999111222',
+      expect.stringContaining('asaas.test/i/'),
+    );
   });
 
   it('sem chave do Asaas a assinatura responde 503 e sem token o webhook some', async () => {

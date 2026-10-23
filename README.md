@@ -67,6 +67,8 @@ O [SDR-AI](https://github.com/Andersonspita/SDR-AI-BARBER-SHOP) prospecta barbea
 - Em `/plataforma`, **Ativar plano** converte o teste (ou um teste vencido) e devolve a barbearia ao ar.
 - Cada etapa (`trial.activated`, `trial.expiring`, `trial.expired`, `subscription.activated`) é enviada ao SDR em `SDR_WEBHOOK_URL`, assinada com HMAC-SHA256 (`SDR_WEBHOOK_SECRET`) e com novas tentativas pela fila.
 
+**Avisos ao dono das barbearias vindas do SDR.** Com `SDR_WEBHOOK_URL` e `SDR_WEBHOOK_SECRET` configurados, os avisos de teste (acabando, vencido) e de cobrança (fatura gerada, pagamento confirmado, vencida, suspensa, reativada) **não saem pelo WhatsApp da plataforma**: o aviso vai ao SDR, que o manda na conversa que já tem com o dono e trata a resposta. Para isso o payload leva `name`, `url`, `subscribeUrl`, `invoiceUrl` e `suspendsAt`. Barbearias criadas direto na plataforma continuam recebendo os avisos daqui.
+
 Teste ponta a ponta: `npm run test:e2e -- trial-provisioning` (Postgres e Redis reais).
 
 ## Cobrança (Asaas)

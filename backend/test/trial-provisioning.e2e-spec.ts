@@ -8,6 +8,7 @@ import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { TrialLifecycleProcessor } from '../src/trial/trial-lifecycle.processor';
 import { signSdrWebhook } from '../src/trial/sdr-webhook.service';
+import { NotificationsService } from '../src/notifications/notifications.service';
 
 /**
  * Teste grátis provisionado pelo SDR-AI, de ponta a ponta, contra Postgres e
@@ -25,7 +26,10 @@ const RUN = Date.now().toString(36);
 interface ReceivedWebhook {
   headers: IncomingHttpHeaders;
   raw: string;
-  body: { event: string; shop: { externalLeadId: string } };
+  body: {
+    event: string;
+    shop: { externalLeadId: string } & Record<string, unknown>;
+  };
 }
 interface TrialBody {
   created: boolean;
@@ -62,6 +66,7 @@ describe('Teste grátis via SDR-AI (e2e)', () => {
     adminPhone: '5577999123456',
   };
   let trial: TrialBody;
+  let trialNotice: jest.SpyInstance;
 
   beforeAll(async () => {
     sdr = createServer((req, res) => {
@@ -98,6 +103,7 @@ describe('Teste grátis via SDR-AI (e2e)', () => {
     );
     await app.init();
     prisma = app.get(PrismaService);
+    trialNotice = jest.spyOn(app.get(NotificationsService), 'trialNotice');
   });
 
   afterAll(async () => {
@@ -224,11 +230,21 @@ describe('Teste grátis via SDR-AI (e2e)', () => {
     expect(Object.keys(webhook.body.shop).sort()).toEqual([
       'externalLeadId',
       'id',
+      'invoiceUrl',
+      'name',
       'plan',
       'slug',
+      'subscribeUrl',
       'subscriptionStatus',
+      'suspendsAt',
       'trialEndsAt',
+      'url',
     ]);
+    expect(webhook.body.shop).toMatchObject({
+      name: 'Barbearia São José & Cia',
+      url: `https://barber-shop.test/${slug}`,
+      subscribeUrl: `https://barber-shop.test/${slug}/dashboard/assinatura`,
+    });
 
     // Depois do primeiro acesso, repetir o pedido não gera link novo.
     const repeat = (await provision(trialRequest).expect(200))
@@ -257,6 +273,8 @@ describe('Teste grátis via SDR-AI (e2e)', () => {
       isActive: false,
     });
     await waitForWebhook('trial.expired');
+    // Veio do SDR: os avisos saem pela conversa dele, não pelo WhatsApp da plataforma.
+    expect(trialNotice).not.toHaveBeenCalled();
     await request(app.getHttpServer())
       .get('/shop')
       .set('x-shop', slug)
